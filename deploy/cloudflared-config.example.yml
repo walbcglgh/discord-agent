@@ -1,0 +1,8 @@
+# 複製到 /etc/cloudflared/config.yml 後替換 <TUNNEL_UUID> 與網域。
+tunnel: <TUNNEL_UUID>
+credentials-file: /root/.cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  - hostname: panel.example.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404

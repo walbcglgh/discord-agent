@@ -12,4 +12,7 @@
 *.db
 *.pem
 *.key
+/cloudflared
+/cloudflared.yml
+/.cloudflared/
 .DS_Store

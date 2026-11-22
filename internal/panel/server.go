@@ -131,6 +131,23 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
+func requestScheme(r *http.Request) string {
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
+		return strings.TrimSpace(strings.Split(p, ",")[0])
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+func requestHost(r *http.Request) string {
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		return strings.TrimSpace(strings.Split(h, ",")[0])
+	}
+	return r.Host
+}
+
 func (s *Server) clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -209,6 +226,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := s.store.Get()
+	secure := requestScheme(r) == "https"
 	csrfCookie, csrfErr := r.Cookie("login_csrf")
 	csrf := ""
 	if csrfErr == nil && csrfCookie.Value != "" {
@@ -223,7 +241,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.SetCookie(w, &http.Cookie{
 			Name: "login_csrf", Value: csrf, Path: "/", HttpOnly: true,
-			SameSite: http.SameSiteLaxMode, MaxAge: 600,
+			SameSite: http.SameSiteLaxMode, Secure: secure, MaxAge: 600,
 		})
 		s.render(w, "login", data)
 		return
@@ -242,7 +260,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if csrfErr != nil || r.FormValue("csrf") != csrf {
 		http.SetCookie(w, &http.Cookie{
 			Name: "login_csrf", Value: csrf, Path: "/", HttpOnly: true,
-			SameSite: http.SameSiteLaxMode, MaxAge: 600,
+			SameSite: http.SameSiteLaxMode, Secure: secure, MaxAge: 600,
 		})
 		data.Error = "表單驗證失敗，請重試。"
 		s.render(w, "login", data)
@@ -275,7 +293,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name: "agent_session", Value: token, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, MaxAge: cfg.Panel.SessionHours * 3600,
+		SameSite: http.SameSiteLaxMode, Secure: secure, MaxAge: cfg.Panel.SessionHours * 3600,
 	})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -287,7 +305,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		delete(s.sessions, c.Value)
 		s.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: "agent_session", Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: "agent_session", Value: "", Path: "/", MaxAge: -1, Secure: requestScheme(r) == "https"})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
@@ -889,11 +907,7 @@ func (s *Server) handleMCPOAuthStart(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/mcp?err="+url.QueryEscape("請先填寫 authorization URL、client ID 與 token URL"), http.StatusSeeOther)
 		return
 	}
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	redirectURI := scheme + "://" + r.Host + "/mcp/oauth/callback"
+	redirectURI := requestScheme(r) + "://" + requestHost(r) + "/mcp/oauth/callback"
 	state := randomHex(24)
 	verifier := randomHex(32)
 	s.oauthMu.Lock()

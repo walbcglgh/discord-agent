@@ -102,6 +102,61 @@ sudo -u agent env PANEL_PASSWORD='你的新密碼' ./discord-agent \
 
 ---
 
+## 4.5 用 Cloudflare Tunnel 對外（建議，不用每次開 SSH tunnel）
+
+面板本身仍只聽 `127.0.0.1:8080`，讓 cloudflared 從本機轉出去即可。程式會認 `X-Forwarded-Proto`，所以 OAuth 回呼會自動變成 `https://你的網域/mcp/oauth/callback`，Cookie 也會加 `Secure`。
+
+### 安裝 cloudflared
+
+```bash
+curl -L --output cloudflared \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+sudo install -m 0755 cloudflared /usr/local/bin/cloudflared
+```
+
+### 方案 A：Quick Tunnel（最快，網址每次重開會變）
+
+```bash
+sudo install -m 0644 deploy/cloudflared-quick.service /etc/systemd/system/cloudflared.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now cloudflared
+sudo journalctl -u cloudflared -f
+```
+
+日誌裡會出現：
+
+```
+https://xxxx-xxxx.trycloudflare.com
+```
+
+直接用瀏覽器開那個網址，帳號 `admin`，密碼同面板密碼。
+
+> Quick Tunnel 的網址重啟後會變；若要固定網址用方案 B。
+
+### 方案 B：Named Tunnel（固定網域）
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create discord-agent-panel
+cloudflared tunnel route dns discord-agent-panel panel.example.com
+```
+
+把 repo 的 `deploy/cloudflared-config.example.yml` 複製到 `/etc/cloudflared/config.yml`，替換 `<TUNNEL_UUID>` 與 hostname，然後：
+
+```bash
+sudo install -m 0644 deploy/cloudflared-named.service /etc/systemd/system/cloudflared.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now cloudflared
+```
+
+### 安全措施（重要）
+
+- 面板「完整設定」裡的 `panel.allowed_ips` 保持空白；Tunnel 進來的來源都是 `127.0.0.1`，填 home IP 反而會把自己鎖在外面。
+- 強烈建議在 Cloudflare Zero Trust 再加一層 Access（Email OTP），即使面板密碼外洩也多一道。
+- OAuth 提供者的 Redirect URI 要填實際對外網址，例如 `https://panel.example.com/mcp/oauth/callback`；MCP 頁會自動顯示目前網址。
+
+---
+
 ## 5. 建立 systemd 服務
 
 ```bash
