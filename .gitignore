@@ -1,0 +1,15 @@
+/dist/
+/data/
+/config.json
+/config.json.tmp
+/.env
+/.workbuddy-ai/
+*.exe
+*.test
+*.out
+*.log
+*.tmp
+*.db
+*.pem
+*.key
+.DS_Store

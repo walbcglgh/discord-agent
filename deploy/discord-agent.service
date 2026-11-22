@@ -1,0 +1,29 @@
+[Unit]
+Description=Selana Discord AI Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+WorkingDirectory=/opt/discord-agent
+EnvironmentFile=/opt/discord-agent/.env
+ExecStart=/opt/discord-agent/discord-agent -config /opt/discord-agent/config.json -env /opt/discord-agent/.env
+Restart=on-failure
+RestartSec=5
+
+# 2C1G 保護：避免 OOM 拖垮整台機器
+MemoryMax=640M
+CPUQuota=150%
+
+# 基本 hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/discord-agent/data /opt/discord-agent/config.json
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

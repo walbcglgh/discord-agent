@@ -1,0 +1,78 @@
+{
+  "assistant_name": "工作小助手",
+  "unavailable_message": "(；ω；｀) {assistant}暫時無法回覆，請稍後再試",
+  "display": {
+    "thinking": false,
+    "tool_calls": false,
+    "raw_output": false
+  },
+  "discord": {
+    "token_env": "DISCORD_BOT_TOKEN",
+    "token": "",
+    "reply_mode": "hybrid",
+    "allowed_channel_ids": [],
+    "admin_user_ids": [],
+    "allowed_guild_ids": [],
+    "dm_enabled": false,
+    "typing_indicator": true,
+    "rate_limit_seconds": 2,
+    "max_reply_chars": 1900
+  },
+  "panel": {
+    "enabled": false,
+    "listen": "127.0.0.1:8080",
+    "username": "admin",
+    "password_hash": "",
+    "session_hours": 24,
+    "allowed_ips": []
+  },
+  "llm": {
+    "models": []
+  },
+  "mcp": {
+    "servers": []
+  },
+  "vps": {
+    "enabled": false,
+    "host": "",
+    "port": 22,
+    "user": "root",
+    "auth_type": "key",
+    "key_env": "VPS_SSH_KEY",
+    "wake_url": ""
+  },
+  "media": {
+    "groq_api_key_env": "GROQ_API_KEY",
+    "tts_voice": "zh-TW-HsiaoChenNeural",
+    "max_tts_chars": 500,
+    "max_audio_seconds": 120
+  },
+  "chat": {
+    "system_prompt": "你是 Discord 伺服器的 AI 助理。語氣簡潔、專業、友善，不寫冗詞贅句，使用繁體中文回覆。",
+    "context_messages": 20,
+    "max_output_tokens": 1024,
+    "temperature": 0.7,
+    "enable_tools": true,
+    "max_tool_rounds": 3,
+    "summary_every": 20,
+    "reply_language": "zh-TW"
+  },
+  "memory": {
+    "enabled": true,
+    "max_facts": 50
+  },
+  "tools": {
+    "calculator": true,
+    "clock": true,
+    "web_search": {
+      "enabled": false,
+      "provider": "tavily",
+      "api_key_env": "TAVILY_API_KEY",
+      "max_results": 3
+    },
+    "allow_memory_write": false
+  },
+  "database": {
+    "path": "data/agent.db"
+  }
+}
