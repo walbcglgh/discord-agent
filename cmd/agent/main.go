@@ -86,16 +86,27 @@ func main() {
 
 	if *panelOnly {
 		web := panel.New(store, mem, nil, mcpMgr, buf, logger)
+		handoff := make(chan struct{})
+		web.SetHandoff(handoff)
 		if err := web.Start(); err != nil {
 			logger.Fatalf("啟動面板失敗: %v", err)
 		}
-		logger.Printf("面板已啟動（一次性）：http://%s ，按 Ctrl+C 結束", cfg.Panel.Listen)
-		<-stop
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = web.Shutdown(ctx)
-		logger.Println("面板已關閉")
-		return
+		logger.Printf("面板已啟動：http://%s ，按 Ctrl+C 結束，或按「完成並啟動 Bot」交接", cfg.Panel.Listen)
+		select {
+		case <-stop:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = web.Shutdown(ctx)
+			logger.Println("面板已關閉")
+			return
+		case <-handoff:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = web.Shutdown(ctx)
+			cancel()
+			logger.Println("面板已關閉，正在啟動 Bot…")
+		}
+		cfg = store.Get()
+		mcpMgr.Refresh(context.Background())
 	}
 
 	token := config.Secret(cfg.Discord.TokenEnv, cfg.Discord.Token)

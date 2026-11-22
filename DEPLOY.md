@@ -100,6 +100,16 @@ sudo -u agent env PANEL_PASSWORD='你的新密碼' ./discord-agent \
   -reset-panel-password -config /opt/discord-agent/config.json -env /opt/discord-agent/.env
 ```
 
+### 一鍵交接（推薦）
+
+在面板「總覽」最上方有 **「完成並啟動 Bot」** 按鈕。所有設定存檔後按下去 → 彈出確認 → 按確定：
+
+- 網頁會顯示「設定完成」並自動關閉面板
+- 同一個程序直接啟動 Bot
+- tmux 視窗會變成 Bot 日誌
+
+按了這個就**不用再**另外執行 `systemctl start discord-agent`。若你想用 systemd 長期管理 Bot，就不要按這個，直接 `Ctrl+C` 關面板再启动服務。
+
 ---
 
 ## 4.5 用 Cloudflare Tunnel 對外（建議，不用每次開 SSH tunnel）
@@ -133,21 +143,69 @@ https://xxxx-xxxx.trycloudflare.com
 
 > Quick Tunnel 的網址重啟後會變；若要固定網址用方案 B。
 
-### 方案 B：Named Tunnel（固定網域）
+### 方案 B：Named Tunnel（固定自訂網域）
+
+前提：網域已託管在 Cloudflare，NS 已生效；該子網域原本若有 A/AAAA 記錄先刪掉。
 
 ```bash
+# 1. 授權 cloudflared（會開瀏覽器，選你的網域）
 cloudflared tunnel login
+
+# 2. 建立 tunnel，記下印出的 UUID
 cloudflared tunnel create discord-agent-panel
+
+# 3. 自動建立 DNS CNAME（把 panel.example.com 換成你的網域）
 cloudflared tunnel route dns discord-agent-panel panel.example.com
 ```
 
-把 repo 的 `deploy/cloudflared-config.example.yml` 複製到 `/etc/cloudflared/config.yml`，替換 `<TUNNEL_UUID>` 與 hostname，然後：
+> 注意：`cloudflared tunnel login` / `create` 若是用 `admin` 執行，憑證會在 `/home/admin/.cloudflared/`；若用 root 執行才會在 `/root/.cloudflared/`。下面設定檔要指向**實際存在**的路徑。
+
+建立設定檔（把 `<UUID>` 換成上一步的 UUID）：
 
 ```bash
+sudo mkdir -p /etc/cloudflared
+sudo tee /etc/cloudflared/config.yml >/dev/null <<'EOF'
+tunnel: <UUID>
+credentials-file: /root/.cloudflared/<UUID>.json
+
+ingress:
+  - hostname: panel.example.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404
+EOF
+```
+
+切換成 Named Tunnel 服務（會覆蓋剛剛的 quick 服務）：
+
+```bash
+sudo systemctl stop cloudflared 2>/dev/null || true
 sudo install -m 0644 deploy/cloudflared-named.service /etc/systemd/system/cloudflared.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now cloudflared
+sudo journalctl -u cloudflared -f
 ```
+
+看到 `Connection registered` 就成功，瀏覽器開 `https://panel.example.com`。
+
+> 若 VPS 上沒有 repo，直接貼下面這份 service 也行：
+>
+> ```bash
+> sudo tee /etc/systemd/system/cloudflared.service >/dev/null <<'EOF'
+> [Unit]
+> Description=Cloudflare Named Tunnel for Discord Agent Panel
+> After=network-online.target
+> Wants=network-online.target
+>
+> [Service]
+> Type=simple
+> ExecStart=/usr/local/bin/cloudflared tunnel --config /etc/cloudflared/config.yml run
+> Restart=on-failure
+> RestartSec=5
+>
+> [Install]
+> WantedBy=multi-user.target
+> EOF
+> ```
 
 ### 安全措施（重要）
 
@@ -158,6 +216,8 @@ sudo systemctl enable --now cloudflared
 ---
 
 ## 5. 建立 systemd 服務
+
+> 若已用第 4 步的「完成並啟動 Bot」，可跳過這節；Bot 已經在跑了。
 
 ```bash
 sudo tee /etc/systemd/system/discord-agent.service >/dev/null <<'EOF'
@@ -251,7 +311,9 @@ sudo -u agent ./discord-agent -panel -config /opt/discord-agent/config.json -env
 | 語音輸入沒反應 | 到面板「多媒體」頁填 Groq API Key |
 | `mkdir data: permission denied` | 啟動前先 `cd /opt/discord-agent`，資料庫路徑是相對路徑 |
 | `install: cannot stat '/root/discord-agent-linux-amd64'` | `sudo -i` 後 `~` 是 `/root`，不是 `admin` 家目錄；用 `find /home /tmp /root -name 'discord-agent-linux-amd64'` 找實際位置 |
-| MCP OAuth 回呼失敗 | 授權服務商的 Redirect URI 要填 `http://127.0.0.1:8080/mcp/oauth/callback`（面板頁會自動顯示目前網址） |
+| `Unable to reach the origin service ... 127.0.0.1:8080: connection refused` | Tunnel 正常，但面板沒啟動；用 `tmux` 開一次性面板並保持執行 |
+| `Tunnel credentials file ... doesn't exist` | 用 `find /home/admin/.cloudflared /root/.cloudflared -name '*.json'` 找實際路徑，改 `credentials-file` 或複製到 `/root/.cloudflared/` |
+| MCP OAuth 回呼失敗 | 授權服務商的 Redirect URI 要填面板頁顯示的實際對外網址 |
 | 面板連不上 | 面板只監聽 `127.0.0.1:8080`，請用 SSH tunnel |
 | 私訊沒回覆 | 刻意設計：私訊一律不處理 |
 | 多人同時 @ | 同一頻道會排隊，一個一個回 |

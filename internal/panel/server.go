@@ -60,6 +60,8 @@ type Server struct {
 	loginFail   map[string]loginFail
 	oauthMu     sync.Mutex
 	oauthStates map[string]oauthState
+	handoff     chan struct{}
+	handoffOnce sync.Once
 }
 
 func New(store *config.Store, mem *memory.Store, bot *discord.Bot, mgr *mcp.Manager, logs *util.LogBuffer, logger *log.Logger) *Server {
@@ -69,6 +71,9 @@ func New(store *config.Store, mem *memory.Store, bot *discord.Bot, mgr *mcp.Mana
 		oauthStates: make(map[string]oauthState),
 	}
 }
+
+// SetHandoff makes the "finish" button signal the caller to start the bot.
+func (s *Server) SetHandoff(ch chan struct{}) { s.handoff = ch }
 
 func (s *Server) Start() error {
 	cfg := s.store.Get()
@@ -115,6 +120,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/media", s.withAuth(s.handleMedia))
 	mux.HandleFunc("/media/save", s.withAuth(s.handleMediaSave))
 	mux.HandleFunc("/commands", s.withAuth(s.handleCommands))
+	mux.HandleFunc("/finish", s.withAuth(s.handleFinish))
 	mux.HandleFunc("/logs", s.withAuth(s.handleLogs))
 	mux.HandleFunc("/errors", s.withAuth(s.handleErrors))
 	mux.HandleFunc("/appearance", s.withAuth(s.handleAppearance))
@@ -1024,6 +1030,28 @@ func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request) 
 	}
 	s.mcpMgr.Refresh(r.Context())
 	http.Redirect(w, r, "/mcp?msg="+url.QueryEscape("OAuth 授權完成"), http.StatusSeeOther)
+}
+
+func (s *Server) handleFinish(w http.ResponseWriter, r *http.Request) {
+	sess, _ := s.sessionOf(r)
+	if r.Method != http.MethodPost || r.FormValue("csrf") != sess.csrf {
+		http.Error(w, "請求無效", http.StatusForbidden)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprint(w, `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>啟動中</title><style>body{font-family:system-ui,"Microsoft JhengHei",sans-serif;background:#f5f7fa;color:#1f2937;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;max-width:420px}</style></head><body><div class="card"><h1>設定完成</h1><p>面板即將關閉，Bot 正在啟動。這個分頁可以直接關掉。</p></div></body></html>`)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	if s.handoff != nil {
+		s.handoffOnce.Do(func() {
+			go func() {
+				time.Sleep(700 * time.Millisecond)
+				close(s.handoff)
+			}()
+		})
+	}
 }
 
 func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {

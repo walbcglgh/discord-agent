@@ -70,6 +70,10 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 <a class="btn" href="/vps">設定 VPS</a>
 <a class="btn" href="/media">設定語音</a>
 </div></div>
+<div class="card" style="border-color:var(--accent)"><h2>完成設定</h2>
+<p class="hint">確認都已存檔後，按下面按鈕關閉面板並啟動 Bot。Bot 會在同一個程序裡接手。</p>
+<form method="post" action="/finish" onsubmit="return confirm('確定完成設定並啟動 Bot？面板將會關閉。')"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>完成並啟動 Bot</button></form>
+</div>
 <div class="card"><h2>系統狀態</h2><div class="grid">
 <div class="kv"><small>上線時間</small><strong>{{.Status.uptime}}</strong></div>
 <div class="kv"><small>目前模型名稱</small><strong>{{.Status.provider}}</strong></div>
