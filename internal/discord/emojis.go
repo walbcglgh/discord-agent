@@ -13,8 +13,6 @@ import (
 
 	"discord-agent/internal/llm"
 	"discord-agent/internal/tools"
-
-	"github.com/bwmarrin/discordgo"
 )
 
 func RegisterEmojiTools(reg *tools.Registry, b *Bot) {
