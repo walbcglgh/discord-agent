@@ -194,16 +194,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := s.store.Get()
-	csrf := randomHex(16)
-	http.SetCookie(w, &http.Cookie{
-		Name: "login_csrf", Value: csrf, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, MaxAge: 600,
-	})
+	csrfCookie, csrfErr := r.Cookie("login_csrf")
+	csrf := ""
+	if csrfErr == nil && csrfCookie.Value != "" {
+		csrf = csrfCookie.Value
+	} else {
+		csrf = randomHex(16)
+	}
 	data := struct {
 		Error string
 		CSRF  string
 	}{CSRF: csrf}
 	if r.Method != http.MethodPost {
+		http.SetCookie(w, &http.Cookie{
+			Name: "login_csrf", Value: csrf, Path: "/", HttpOnly: true,
+			SameSite: http.SameSiteLaxMode, MaxAge: 600,
+		})
 		s.render(w, "login", data)
 		return
 	}
@@ -218,8 +224,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	cookie, err := r.Cookie("login_csrf")
-	if err != nil || r.FormValue("csrf") != cookie.Value {
+	if csrfErr != nil || r.FormValue("csrf") != csrf {
+		http.SetCookie(w, &http.Cookie{
+			Name: "login_csrf", Value: csrf, Path: "/", HttpOnly: true,
+			SameSite: http.SameSiteLaxMode, MaxAge: 600,
+		})
 		data.Error = "表單驗證失敗，請重試。"
 		s.render(w, "login", data)
 		return
