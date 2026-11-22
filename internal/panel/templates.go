@@ -29,7 +29,10 @@ button:hover{opacity:.9}button.ghost{background:#eef2ff;color:var(--accent)}
 .err{background:#fef2f2;color:var(--err);border:1px solid #fecaca;padding:10px 12px;border-radius:8px;margin-bottom:14px}
 .hint{color:var(--muted);font-size:13px;line-height:1.7}
 pre{background:#111827;color:#e5e7eb;border-radius:8px;padding:14px;overflow:auto;max-height:620px;font-size:12.5px;line-height:1.5}
-a.btn{display:inline-block;margin-top:12px;color:var(--accent)}
+a.btn{display:inline-block;margin-top:12px;padding:9px 18px;border-radius:8px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600}
+a.btn:hover{opacity:.9}
+details{margin:12px 0;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#f9fafb}
+summary{cursor:pointer;font-weight:600;color:var(--accent)}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
 </style></head><body>
 {{end}}
@@ -59,6 +62,14 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 <main>
 {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
 <h1>總覽</h1>
+<div class="card"><h2>快速動作</h2>
+<div style="display:flex;gap:10px;flex-wrap:wrap">
+<a class="btn" href="/discord">設定 Discord</a>
+<a class="btn" href="/models">新增模型</a>
+<a class="btn" href="/mcp">新增 MCP / OAuth 授權</a>
+<a class="btn" href="/vps">設定 VPS</a>
+<a class="btn" href="/media">設定語音</a>
+</div></div>
 <div class="card"><h2>系統狀態</h2><div class="grid">
 <div class="kv"><small>上線時間</small><strong>{{.Status.uptime}}</strong></div>
 <div class="kv"><small>目前模型名稱</small><strong>{{.Status.provider}}</strong></div>
@@ -123,6 +134,18 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 </div>
 <div class="card"><h2>手動新增</h2>
 <form method="post" action="/models/add"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>常見預設（選完按「帶入」）</label>
+<div style="display:flex;gap:8px;align-items:center">
+<select id="model_preset" style="flex:1">
+<option value="">自訂</option>
+<option value="deepseek">DeepSeek</option>
+<option value="openai">OpenAI</option>
+<option value="anthropic">Anthropic</option>
+<option value="gemini">Gemini</option>
+<option value="groq">Groq</option>
+</select>
+<button type="button" class="ghost" onclick="applyPreset()">帶入</button>
+</div>
 <label>Name（顯示與分組用）</label><input name="name" placeholder="DeepSeek v4.1 Flash" required>
 <label>協議</label><select name="protocol">
 <option value="openai-chat">OpenAI Chat Completions</option>
@@ -133,8 +156,10 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 <label>上游 Model ID</label><input name="model_id" placeholder="deepseek-chat" required>
 <label>Base URL</label><input name="base_url" placeholder="https://api.deepseek.com/v1">
 <label>API Key 環境變數名稱</label><input name="api_key_env" placeholder="DEEPSEEK_API_KEY">
+<details><summary>進階</summary>
 <label>或直接貼 API Key（不建議）</label><input name="api_key">
 <div style="display:flex;gap:16px"><label style="flex:1">Max Tokens<input name="max_tokens" value="1024"></label><label style="flex:1">Temperature<input name="temperature" value="0.7"></label></div>
+</details>
 <label style="font-weight:400"><input type="checkbox" name="enabled" checked style="width:auto"> 啟用</label>
 <button>新增模型</button></form></div>
 <div class="card"><h2>從提供商批次帶入（/v1/models）</h2>
@@ -160,6 +185,25 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 <input name="name_{{$i}}" value="{{$id}}" style="flex:1"></div>{{end}}
 <button>批次新增</button></form>{{end}}
 </div>
+<script>
+function applyPreset() {
+  const p = document.getElementById('model_preset').value;
+  const presets = {
+    deepseek: {name:'DeepSeek V4.1 Flash', protocol:'openai-chat', base_url:'https://api.deepseek.com/v1', model_id:'deepseek-chat', key:'DEEPSEEK_API_KEY'},
+    openai: {name:'OpenAI GPT', protocol:'openai-chat', base_url:'https://api.openai.com/v1', model_id:'gpt-4o-mini', key:'OPENAI_API_KEY'},
+    anthropic: {name:'Anthropic Claude', protocol:'anthropic', base_url:'https://api.anthropic.com/v1', model_id:'claude-3-5-haiku-latest', key:'ANTHROPIC_API_KEY'},
+    gemini: {name:'Google Gemini', protocol:'google', base_url:'https://generativelanguage.googleapis.com/v1beta', model_id:'gemini-2.0-flash', key:'GEMINI_API_KEY'},
+    groq: {name:'Groq', protocol:'openai-chat', base_url:'https://api.groq.com/openai/v1', model_id:'llama-3.3-70b-versatile', key:'GROQ_API_KEY'}
+  };
+  const v = presets[p]; if (!v) return;
+  const f = document.querySelector('form[action="/models/add"]');
+  f.elements['name'].value = v.name;
+  f.elements['protocol'].value = v.protocol;
+  f.elements['base_url'].value = v.base_url;
+  f.elements['model_id'].value = v.model_id;
+  f.elements['api_key_env'].value = v.key;
+}
+</script>
 </main></body></html>
 {{end}}
 
@@ -170,28 +214,40 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
 <h1>MCP 伺服器</h1>
 <div class="card"><h2>已設定</h2>
-{{if .Servers}}<table><tr><th>名稱</th><th>URL</th><th>驗證</th><th>啟用</th><th></th></tr>
+{{if .Servers}}<table><tr><th>名稱</th><th>URL</th><th>驗證</th><th>啟用</th><th>操作</th></tr>
 {{range .Servers}}<tr><td>{{.Name}}</td><td>{{.URL}}</td><td>{{.AuthType}}</td><td>{{if .Enabled}}是{{else}}否{{end}}</td>
-<td><form method="post" action="/mcp/toggle"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button class="ghost" style="margin:0;padding:4px 8px">切換</button></form>
-<form method="post" action="/mcp/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button class="ghost" style="margin:0;padding:4px 8px">刪除</button></form></td></tr>{{end}}
+<td style="display:flex;gap:6px;flex-wrap:wrap">
+{{if eq .AuthType "oauth"}}<form method="post" action="/mcp/oauth/start"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button style="margin:0;padding:4px 8px">OAuth 授權</button></form>{{end}}
+<form method="post" action="/mcp/toggle"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button class="ghost" style="margin:0;padding:4px 8px">切換</button></form>
+<form method="post" action="/mcp/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button class="ghost" style="margin:0;padding:4px 8px">刪除</button></form>
+</td></tr>{{end}}
 </table>{{else}}<p class="hint">尚未設定 MCP 伺服器。</p>{{end}}
 </div>
 <div class="card"><h2>新增 MCP 伺服器</h2>
 <form method="post" action="/mcp/add"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <label>名稱</label><input name="name" required>
 <label>URL（Streamable HTTP endpoint）</label><input name="url" placeholder="https://mcp.example.com/mcp" required>
-<label>驗證方式</label><select name="auth_type"><option value="none">無</option><option value="api_key">API Key</option><option value="oauth">OAuth</option></select>
-<p class="hint">API Key 欄位：可用環境變數名稱，或直接填值。OAuth 欄位：access token 可用環境變數或直接填；若提供 refresh token 與 token URL，401 時會自動刷新。</p>
+<label>驗證方式</label><select name="auth_type"><option value="none">無</option><option value="api_key">API Key</option><option value="oauth">OAuth（授權碼流程）</option></select>
+<details><summary>API Key 設定</summary>
 <label>API Key 環境變數</label><input name="api_key_env">
 <label>或直接貼 API Key</label><input name="api_key">
+</details>
+<details><summary>OAuth 設定（按上方「OAuth 授權」按鈕跳轉授權頁）</summary>
+<p class="hint">授權回呼網址請填：<code id="oauth_redirect">http://127.0.0.1:8080/mcp/oauth/callback</code>。若用 SSH tunnel，從本機瀏覽器授權後會自動回到本機面板。</p>
+<label>Authorization URL</label><input name="oauth_auth_url" placeholder="https://provider.com/authorize">
+<label>Token URL</label><input name="oauth_token_url" placeholder="https://provider.com/token">
+<label>Client ID</label><input name="oauth_client_id">
+<label>Client secret（若提供者需要）</label><input name="oauth_client_secret">
+<label>Scopes（逗號分隔）</label><input name="oauth_scopes">
+<label style="font-weight:400"><input type="checkbox" name="oauth_use_pkce" checked style="width:auto"> 使用 PKCE（建議）</label>
+<details><summary>進階：直接貼 token（一般不建議）</summary>
 <label>OAuth access token 環境變數</label><input name="oauth_token_env">
-<label>或直接貼 OAuth access token</label><input name="oauth_access_token">
-<label>OAuth refresh token</label><input name="oauth_refresh_token">
-<label>OAuth token URL</label><input name="oauth_token_url">
-<label>OAuth client ID</label><input name="oauth_client_id">
-<label>OAuth client secret</label><input name="oauth_client_secret">
-<label>OAuth scopes（逗號分隔）</label><input name="oauth_scopes">
+<label>或直接貼 access token</label><input name="oauth_access_token">
+<label>或貼 refresh token</label><input name="oauth_refresh_token">
+</details>
+</details>
 <button>新增伺服器</button></form></div>
+<script>document.getElementById('oauth_redirect').textContent = location.origin + '/mcp/oauth/callback';</script>
 </main></body></html>
 {{end}}
 
@@ -210,11 +266,13 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 <option value="channel" {{if eq .Discord.ReplyMode "channel"}}selected{{end}}>白名單頻道全部</option>
 </select>
 <label>管理員 User ID（逗號分隔）</label><input name="admin_user_ids" value="{{range $i,$v := .Discord.AdminUserIDs}}{{if $i}}, {{end}}{{$v}}{{end}}">
+<details><summary>進階：頻道、伺服器與限速</summary>
 <label>白名單頻道 ID（逗號分隔）</label><input name="allowed_channel_ids" value="{{range $i,$v := .Discord.AllowedChannelIDs}}{{if $i}}, {{end}}{{$v}}{{end}}">
 <label>限制伺服器 ID（逗號分隔，空白=全部）</label><input name="allowed_guild_ids" value="{{range $i,$v := .Discord.AllowedGuildIDs}}{{if $i}}, {{end}}{{$v}}{{end}}">
 <label>每秒限速間隔（秒）</label><input name="rate_limit_seconds" value="{{.Discord.RateLimitSeconds}}">
 <label>單則回覆上限（500~2000）</label><input name="max_reply_chars" value="{{.Discord.MaxReplyChars}}">
 <p class="hint">私訊一律不處理；此選項已忽略。</p>
+</details>
 <label style="font-weight:400"><input type="checkbox" name="typing_indicator" {{if .Discord.TypingIndicator}}checked{{end}} style="width:auto"> 顯示正在輸入</label>
 <button>儲存</button></form></div>
 </main></body></html>
@@ -233,11 +291,13 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 <label>Port</label><input name="port" value="{{.VPS.Port}}">
 <label>User</label><input name="user" value="{{.VPS.User}}">
 <label>驗證方式</label><select name="auth_type"><option value="key" {{if eq .VPS.AuthType "key"}}selected{{end}}>SSH 私鑰</option><option value="password" {{if eq .VPS.AuthType "password"}}selected{{end}}>密碼</option></select>
+<details><summary>憑證（進階）</summary>
 <label>私鑰環境變數名稱</label><input name="key_env" value="{{.VPS.KeyEnv}}" autocomplete="off">
 <label>或直接貼私鑰（留空表示沿用）</label><textarea name="key" style="min-height:90px" autocomplete="off"></textarea>
 <label>私鑰 passphrase（留空表示沿用）</label><input name="passphrase" type="password" autocomplete="off">
 <label>密碼環境變數名稱</label><input name="password_env" value="{{.VPS.PasswordEnv}}" autocomplete="off">
 <label>或直接貼密碼（留空表示沿用）</label><input name="password" type="password" autocomplete="off">
+</details>
 <label>喚醒 URL（選用，連不上時自動呼叫）</label><input name="wake_url" value="{{.VPS.WakeURL}}" autocomplete="off">
 <button>儲存</button></form></div>
 </main></body></html>
@@ -252,11 +312,13 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 <div class="card"><h2>語音輸入（Groq whisper-large-v3）</h2>
 <form method="post" action="/media/save"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <label>Groq API Key 環境變數名稱</label><input name="groq_api_key_env" value="{{.Media.GroqAPIKeyEnv}}" autocomplete="off">
+<details><summary>進階</summary>
 <label>或直接貼 Key（留空表示沿用）</label><input name="groq_api_key" type="password" autocomplete="off">
 <label>音訊上限（秒）</label><input name="max_audio_seconds" value="{{.Media.MaxAudioSeconds}}">
-<h2>語音輸出（edge-tts）</h2>
 <label>語音</label><input name="tts_voice" value="{{.Media.TTSVoice}}">
-<label>文字上限（字元，約 1 分鐘）</label><input name="max_tts_chars" value="{{.Media.MaxTTSChars}}">
+<label>文字上限（字元，約 2 分鐘）</label><input name="max_tts_chars" value="{{.Media.MaxTTSChars}}">
+</details>
+<p class="hint">語音輸出使用 edge-tts。</p>
 <p class="hint">VPS 需自行安裝 <code>python3 -m pip install edge-tts</code>。超過上限直接回覆做不到，不會合成。</p>
 <button>儲存</button></form></div>
 </main></body></html>

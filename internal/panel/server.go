@@ -3,9 +3,12 @@ package panel
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -36,6 +39,13 @@ type loginFail struct {
 	locked time.Time
 }
 
+type oauthState struct {
+	serverID    string
+	verifier    string
+	redirectURI string
+	expires     time.Time
+}
+
 type Server struct {
 	store  *config.Store
 	mem    *memory.Store
@@ -45,15 +55,18 @@ type Server struct {
 	logger *log.Logger
 	srv    *http.Server
 
-	mu        sync.Mutex
-	sessions  map[string]session
-	loginFail map[string]loginFail
+	mu          sync.Mutex
+	sessions    map[string]session
+	loginFail   map[string]loginFail
+	oauthMu     sync.Mutex
+	oauthStates map[string]oauthState
 }
 
 func New(store *config.Store, mem *memory.Store, bot *discord.Bot, mgr *mcp.Manager, logs *util.LogBuffer, logger *log.Logger) *Server {
 	return &Server{
 		store: store, mem: mem, bot: bot, mcpMgr: mgr, logs: logs, logger: logger,
 		sessions: make(map[string]session), loginFail: make(map[string]loginFail),
+		oauthStates: make(map[string]oauthState),
 	}
 }
 
@@ -95,6 +108,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/mcp/add", s.withAuth(s.handleMCPAdd))
 	mux.HandleFunc("/mcp/delete", s.withAuth(s.handleMCPDelete))
 	mux.HandleFunc("/mcp/toggle", s.withAuth(s.handleMCPToggle))
+	mux.HandleFunc("/mcp/oauth/start", s.withAuth(s.handleMCPOAuthStart))
+	mux.HandleFunc("/mcp/oauth/callback", s.handleMCPOAuthCallback)
 	mux.HandleFunc("/vps", s.withAuth(s.handleVPS))
 	mux.HandleFunc("/vps/save", s.withAuth(s.handleVPSSave))
 	mux.HandleFunc("/media", s.withAuth(s.handleMedia))
@@ -593,10 +608,13 @@ func (s *Server) handleMCPAdd(w http.ResponseWriter, r *http.Request) {
 		OAuthTokenEnv:     strings.TrimSpace(r.FormValue("oauth_token_env")),
 		OAuthAccessToken:  strings.TrimSpace(r.FormValue("oauth_access_token")),
 		OAuthRefreshToken: strings.TrimSpace(r.FormValue("oauth_refresh_token")),
+		OAuthAuthURL:      strings.TrimSpace(r.FormValue("oauth_auth_url")),
 		OAuthTokenURL:     strings.TrimSpace(r.FormValue("oauth_token_url")),
 		OAuthClientID:     strings.TrimSpace(r.FormValue("oauth_client_id")),
 		OAuthClientSecret: strings.TrimSpace(r.FormValue("oauth_client_secret")),
-		OAuthScopes:       scopes, Enabled: true,
+		OAuthScopes:       scopes,
+		OAuthUsePKCE:      r.FormValue("oauth_use_pkce") == "on",
+		Enabled:           true,
 	}
 	if srv.Name == "" || srv.URL == "" {
 		http.Redirect(w, r, "/mcp?err="+url.QueryEscape("name 與 url 不可為空"), http.StatusSeeOther)
@@ -846,6 +864,152 @@ func (s *Server) handleMediaSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/media?msg="+url.QueryEscape("多媒體設定已更新"), http.StatusSeeOther)
+}
+
+func (s *Server) handleMCPOAuthStart(w http.ResponseWriter, r *http.Request) {
+	sess, _ := s.sessionOf(r)
+	if r.Method != http.MethodPost || r.FormValue("csrf") != sess.csrf {
+		http.Error(w, "請求無效", http.StatusForbidden)
+		return
+	}
+	id := r.FormValue("id")
+	var srv config.MCPServerConfig
+	found := false
+	for _, c := range s.store.Get().MCP.Servers {
+		if c.ID == id {
+			srv, found = c, true
+			break
+		}
+	}
+	if !found || srv.AuthType != "oauth" {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape("找不到 OAuth 伺服器"), http.StatusSeeOther)
+		return
+	}
+	if strings.TrimSpace(srv.OAuthAuthURL) == "" || strings.TrimSpace(srv.OAuthClientID) == "" || strings.TrimSpace(srv.OAuthTokenURL) == "" {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape("請先填寫 authorization URL、client ID 與 token URL"), http.StatusSeeOther)
+		return
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	redirectURI := scheme + "://" + r.Host + "/mcp/oauth/callback"
+	state := randomHex(24)
+	verifier := randomHex(32)
+	s.oauthMu.Lock()
+	s.oauthStates[state] = oauthState{
+		serverID: id, verifier: verifier, redirectURI: redirectURI,
+		expires: time.Now().Add(10 * time.Minute),
+	}
+	s.oauthMu.Unlock()
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("client_id", srv.OAuthClientID)
+	q.Set("redirect_uri", redirectURI)
+	if len(srv.OAuthScopes) > 0 {
+		q.Set("scope", strings.Join(srv.OAuthScopes, " "))
+	}
+	q.Set("state", state)
+	if srv.OAuthUsePKCE {
+		sum := sha256.Sum256([]byte(verifier))
+		q.Set("code_challenge", base64.RawURLEncoding.EncodeToString(sum[:]))
+		q.Set("code_challenge_method", "S256")
+	}
+	sep := "?"
+	if strings.Contains(srv.OAuthAuthURL, "?") {
+		sep = "&"
+	}
+	http.Redirect(w, r, srv.OAuthAuthURL+sep+q.Encode(), http.StatusFound)
+}
+
+func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if e := q.Get("error"); e != "" {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape("OAuth 授權失敗: "+e), http.StatusSeeOther)
+		return
+	}
+	state := q.Get("state")
+	code := q.Get("code")
+	s.oauthMu.Lock()
+	pending, ok := s.oauthStates[state]
+	if ok {
+		delete(s.oauthStates, state)
+	}
+	s.oauthMu.Unlock()
+	if !ok || code == "" || time.Now().After(pending.expires) {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape("OAuth state 無效或已過期"), http.StatusSeeOther)
+		return
+	}
+	var srv config.MCPServerConfig
+	found := false
+	cfg := s.store.Get()
+	for _, c := range cfg.MCP.Servers {
+		if c.ID == pending.serverID {
+			srv, found = c, true
+			break
+		}
+	}
+	if !found {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape("找不到 OAuth 伺服器"), http.StatusSeeOther)
+		return
+	}
+	form := url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {code},
+		"redirect_uri": {pending.redirectURI},
+		"client_id":    {srv.OAuthClientID},
+	}
+	if srv.OAuthClientSecret != "" {
+		form.Set("client_secret", srv.OAuthClientSecret)
+	}
+	if srv.OAuthUsePKCE {
+		form.Set("code_verifier", pending.verifier)
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, srv.OAuthTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 500000))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape("OAuth token 交換失敗: HTTP "+strconv.Itoa(resp.StatusCode)), http.StatusSeeOther)
+		return
+	}
+	var token struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(body, &token); err != nil || token.AccessToken == "" {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape("OAuth token 解析失敗"), http.StatusSeeOther)
+		return
+	}
+	next, err := cfg.Clone()
+	if err != nil {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	for i := range next.MCP.Servers {
+		if next.MCP.Servers[i].ID == srv.ID {
+			next.MCP.Servers[i].OAuthAccessToken = token.AccessToken
+			if token.RefreshToken != "" {
+				next.MCP.Servers[i].OAuthRefreshToken = token.RefreshToken
+			}
+		}
+	}
+	if err := s.store.Replace(next); err != nil {
+		http.Redirect(w, r, "/mcp?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.mcpMgr.Refresh(r.Context())
+	http.Redirect(w, r, "/mcp?msg="+url.QueryEscape("OAuth 授權完成"), http.StatusSeeOther)
 }
 
 func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {

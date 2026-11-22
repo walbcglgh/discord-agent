@@ -111,10 +111,12 @@ type MCPServerConfig struct {
 	OAuthTokenEnv     string   `json:"oauth_token_env,omitempty"`
 	OAuthAccessToken  string   `json:"oauth_access_token,omitempty"`
 	OAuthRefreshToken string   `json:"oauth_refresh_token,omitempty"`
+	OAuthAuthURL      string   `json:"oauth_auth_url,omitempty"`
 	OAuthTokenURL     string   `json:"oauth_token_url,omitempty"`
 	OAuthClientID     string   `json:"oauth_client_id,omitempty"`
 	OAuthClientSecret string   `json:"oauth_client_secret,omitempty"`
 	OAuthScopes       []string `json:"oauth_scopes,omitempty"`
+	OAuthUsePKCE      bool     `json:"oauth_use_pkce,omitempty"`
 	Enabled           bool     `json:"enabled"`
 }
 

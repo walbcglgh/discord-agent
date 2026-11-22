@@ -195,6 +195,8 @@ sudo -u agent ./discord-agent -panel -config /opt/discord-agent/config.json -env
 | TTS 沒聲音 | 確認 venv 已裝 `edge-tts`，且 systemd 的 `Environment=PATH=...` 已取消註解 |
 | 語音輸入沒反應 | 到面板「多媒體」頁填 Groq API Key |
 | `mkdir data: permission denied` | 啟動前先 `cd /opt/discord-agent`，資料庫路徑是相對路徑 |
+| `install: cannot stat '/root/discord-agent-linux-amd64'` | `sudo -i` 後 `~` 是 `/root`，不是 `admin` 家目錄；用 `find /home /tmp /root -name 'discord-agent-linux-amd64'` 找實際位置 |
+| MCP OAuth 回呼失敗 | 授權服務商的 Redirect URI 要填 `http://127.0.0.1:8080/mcp/oauth/callback`（面板頁會自動顯示目前網址） |
 | 面板連不上 | 面板只監聽 `127.0.0.1:8080`，請用 SSH tunnel |
 | 私訊沒回覆 | 刻意設計：私訊一律不處理 |
 | 多人同時 @ | 同一頻道會排隊，一個一個回 |
