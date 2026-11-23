@@ -82,15 +82,16 @@ http://127.0.0.1:8080
 
 > 只能本機連；如果要從外面連，請自己加 SSH tunnel：`ssh -L 8080:127.0.0.1:8080 user@vps`。
 
-在面板裡至少完成：
+面板首頁只有幾個大按鈕，**按了才會彈出設定視窗**。至少完成：
 
-1. **Discord** 頁：貼上 Bot Token（或填 `DISCORD_BOT_TOKEN` 到 `.env`）。
-2. **模型** 頁：新增至少一個模型：
+1. 按 **Discord Bot**：貼上 Bot Token（或填 `DISCORD_BOT_TOKEN` 到 `.env`），按儲存。
+2. 按 **模型**，展開「新增模型」：
+   - 可先選常見預設再按「帶入」
    - Name：例如 `DeepSeek v4.1 Flash`（會出現在頁尾）
    - 協議：`openai-chat` / `openai-responses` / `anthropic` / `google`
-   - 上游 Model ID、Base URL、API Key 或 API Key 環境變數名稱
-   - 勾選啟用
-3. 可選：**VPS**、**多媒體**、**MCP** 頁依需求填。
+   - 上游 Model ID、Base URL、API Key 環境變數名稱
+   - 勾選啟用，按新增
+3. 可選：**VPS**、**語音**、**MCP**、**助理設定** 依需求填。進階欄位都收在「進階」裡。
 
 按完儲存後 `Ctrl+C` 結束面板。密碼若忘記：
 
@@ -102,13 +103,15 @@ sudo -u agent env PANEL_PASSWORD='你的新密碼' ./discord-agent \
 
 ### 一鍵交接（推薦）
 
-在面板「總覽」最上方有 **「完成並啟動 Bot」** 按鈕。所有設定存檔後按下去 → 彈出確認 → 按確定：
+在面板首頁下方有 **「完成並啟動 Bot」** 按鈕。所有設定存檔後按下去 → 彈出確認 → 按確定：
 
 - 網頁會顯示「設定完成」並自動關閉面板
 - 同一個程序直接啟動 Bot
-- tmux 視窗會變成 Bot 日誌
+- 若在 systemd 裡跑，服務會從「面板」無縫變成 Bot，不會中斷
 
-按了這個就**不用再**另外執行 `systemctl start discord-agent`。若你想用 systemd 長期管理 Bot，就不要按這個，直接 `Ctrl+C` 關面板再启动服務。
+按了這個就**不用再**另外執行 `systemctl start discord-agent`。
+
+> 不想用 tmux 的話，直接把 `-panel` 放進 systemd 的 ExecStart（見第 5 步），按完一鍵交接後服務會繼續以 Bot 身份活著，關掉 SSH 也不受影響。
 
 ---
 
@@ -217,7 +220,7 @@ sudo journalctl -u cloudflared -f
 
 ## 5. 建立 systemd 服務
 
-> 若已用第 4 步的「完成並啟動 Bot」，可跳過這節；Bot 已經在跑了。
+> 這份服務刻意用 `-panel` 啟動：開機後面板會自己跑起來，按「完成並啟動 Bot」後會在同進程變成 Bot，關 SSH 也不會死。若你已經手動按完一鍵交接且 Bot 正在跑，就不要再啟動這個服務，避免兩個 Bot。設定完成後若不想每次開機都進面板，把 ExecStart 裡的 `-panel` 拿掉即可。
 
 ```bash
 sudo tee /etc/systemd/system/discord-agent.service >/dev/null <<'EOF'
@@ -234,7 +237,7 @@ WorkingDirectory=/opt/discord-agent
 EnvironmentFile=/opt/discord-agent/.env
 # 若安裝了 edge-tts venv，取消下一行註解：
 # Environment=PATH=/opt/discord-agent/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/opt/discord-agent/discord-agent -config /opt/discord-agent/config.json -env /opt/discord-agent/.env
+ExecStart=/opt/discord-agent/discord-agent -panel -config /opt/discord-agent/config.json -env /opt/discord-agent/.env
 Restart=on-failure
 RestartSec=5
 
@@ -284,7 +287,7 @@ OAuth2 URL 用這個（權限已含踢出、封鎖、管理成員、檢視稽核
 https://discord.com/oauth2/authorize?client_id=<BOT_CLIENT_ID>&permissions=2201170807942&scope=bot%20applications.commands
 ```
 
-面板「總覽」頁也會自動產生這顆連結。
+面板首頁也會自動產生這顆邀請連結。
 
 ---
 
@@ -305,10 +308,10 @@ sudo -u agent ./discord-agent -panel -config /opt/discord-agent/config.json -env
 
 | 現象 | 處理 |
 |---|---|
-| `沒有已啟用且具備金鑰的模型` | 到面板「模型」頁新增並啟用模型，確認 API Key 或環境變數有值 |
+| `沒有已啟用且具備金鑰的模型` | 按面板的「模型」按鈕新增並啟用模型，確認 API Key 或環境變數有值 |
 | `尚未設定 ... 的 API key` | 填寫 API Key，或在 `.env` 設對應環境變數後重啟 |
 | TTS 沒聲音 | 確認 venv 已裝 `edge-tts`，且 systemd 的 `Environment=PATH=...` 已取消註解 |
-| 語音輸入沒反應 | 到面板「多媒體」頁填 Groq API Key |
+| 語音輸入沒反應 | 按面板的「語音」按鈕填 Groq API Key |
 | `mkdir data: permission denied` | 啟動前先 `cd /opt/discord-agent`，資料庫路徑是相對路徑 |
 | `install: cannot stat '/root/discord-agent-linux-amd64'` | `sudo -i` 後 `~` 是 `/root`，不是 `admin` 家目錄；用 `find /home /tmp /root -name 'discord-agent-linux-amd64'` 找實際位置 |
 | `Unable to reach the origin service ... 127.0.0.1:8080: connection refused` | Tunnel 正常，但面板沒啟動；用 `tmux` 開一次性面板並保持執行 |

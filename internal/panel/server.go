@@ -46,6 +46,35 @@ type oauthState struct {
 	expires     time.Time
 }
 
+// pageData backs the single console template. Active selects which settings
+// dialog is opened automatically after a redirect.
+type pageData struct {
+	Active             string
+	CSRF               string
+	Message            string
+	Error              string
+	Status             map[string]any
+	Config             *config.Config
+	Env                map[string]bool
+	InviteURL          string
+	JSON               string
+	AssistantName      string
+	UnavailableMessage string
+	Display            config.DisplayConfig
+	Models             []config.ModelConfig
+	Discovered         []string
+	DiscProtocol       string
+	DiscBaseURL        string
+	DiscKeyEnv         string
+	DiscKey            string
+	Servers            []config.MCPServerConfig
+	Discord            config.DiscordConfig
+	VPS                config.VPSConfig
+	Media              config.MediaConfig
+	Lines              []string
+	Entries            []memory.ErrorEntry
+}
+
 type Server struct {
 	store  *config.Store
 	mem    *memory.Store
@@ -316,8 +345,23 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
+	s.render(w, "console", s.page(r, ""))
+}
+
+// page builds the shared console data for a request. active is the dialog id
+// that should reopen after a form POST redirect.
+func (s *Server) page(r *http.Request, active string) pageData {
 	sess, _ := s.sessionOf(r)
 	cfg := s.store.Get()
+	d := pageData{
+		Active: active, CSRF: sess.csrf,
+		Message: r.URL.Query().Get("msg"), Error: r.URL.Query().Get("err"),
+		Status: s.status(), Config: cfg,
+		Discord: cfg.Discord, VPS: cfg.VPS, Media: cfg.Media,
+		Models: cfg.LLM.Models, Servers: cfg.MCP.Servers,
+		AssistantName: cfg.AssistantName, UnavailableMessage: cfg.UnavailableMessage,
+		Display: cfg.Display,
+	}
 	env := map[string]bool{}
 	names := []string{cfg.Discord.TokenEnv, "PANEL_PASSWORD"}
 	for _, m := range cfg.LLM.Models {
@@ -325,8 +369,8 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			names = append(names, m.APIKeyEnv)
 		}
 	}
-	for _, s := range cfg.MCP.Servers {
-		for _, n := range []string{s.APIKeyEnv, s.OAuthTokenEnv} {
+	for _, srv := range cfg.MCP.Servers {
+		for _, n := range []string{srv.APIKeyEnv, srv.OAuthTokenEnv} {
 			if n != "" {
 				names = append(names, n)
 			}
@@ -341,24 +385,12 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		}
 		env[n] = os.Getenv(n) != "" || apiKeyInline(cfg, n) != ""
 	}
-	status := s.status()
-	invite := ""
-	if id, ok := status["bot_id"].(string); ok && id != "" {
-		invite = "https://discord.com/oauth2/authorize?client_id=" + id +
+	d.Env = env
+	if id, ok := d.Status["bot_id"].(string); ok && id != "" {
+		d.InviteURL = "https://discord.com/oauth2/authorize?client_id=" + id +
 			"&permissions=2201170807942&scope=" + url.QueryEscape("bot applications.commands")
 	}
-	data := struct {
-		Status    map[string]any
-		Config    *config.Config
-		Env       map[string]bool
-		InviteURL string
-		CSRF      string
-		Message   string
-	}{
-		Status: status, Config: cfg, Env: env, InviteURL: invite, CSRF: sess.csrf,
-		Message: r.URL.Query().Get("msg"),
-	}
-	s.render(w, "overview", data)
+	return d
 }
 
 func apiKeyInline(cfg *config.Config, envName string) string {
@@ -415,49 +447,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		cfg = s.store.Get()
 	}
 	b, _ := json.MarshalIndent(cfg, "", "  ")
-	data := struct {
-		JSON               string
-		CSRF               string
-		AssistantName      string
-		UnavailableMessage string
-		Display            config.DisplayConfig
-		Message            string
-		Error              string
-	}{
-		JSON: string(b), CSRF: sess.csrf,
-		AssistantName: cfg.AssistantName, UnavailableMessage: cfg.UnavailableMessage,
-		Display: cfg.Display, Message: msg, Error: errMsg,
-	}
-	s.render(w, "settings", data)
-}
-
-type modelsData struct {
-	Models       []config.ModelConfig
-	CSRF         string
-	Message      string
-	Error        string
-	Discovered   []string
-	DiscProtocol string
-	DiscBaseURL  string
-	DiscKeyEnv   string
-	DiscKey      string
-}
-
-func (s *Server) renderModels(w http.ResponseWriter, r *http.Request, d modelsData) {
-	sess, _ := s.sessionOf(r)
-	d.Models = s.store.Get().LLM.Models
-	d.CSRF = sess.csrf
-	if d.Message == "" {
-		d.Message = r.URL.Query().Get("msg")
-	}
-	if d.Error == "" {
-		d.Error = r.URL.Query().Get("err")
-	}
-	s.render(w, "models", d)
+	d := s.page(r, "settings")
+	d.JSON = string(b)
+	d.Message, d.Error = msg, errMsg
+	s.render(w, "console", d)
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	s.renderModels(w, r, modelsData{})
+	s.render(w, "console", s.page(r, "models"))
 }
 
 func modelFromForm(r *http.Request) (config.ModelConfig, error) {
@@ -516,10 +513,9 @@ func (s *Server) handleModelDiscover(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	s.renderModels(w, r, modelsData{
-		Discovered: ids, DiscProtocol: protocol, DiscBaseURL: base,
-		DiscKeyEnv: keyEnv, DiscKey: key,
-	})
+	d := s.page(r, "models")
+	d.Discovered, d.DiscProtocol, d.DiscBaseURL, d.DiscKeyEnv, d.DiscKey = ids, protocol, base, keyEnv, key
+	s.render(w, "console", d)
 }
 
 func (s *Server) handleModelBulk(w http.ResponseWriter, r *http.Request) {
@@ -589,28 +585,8 @@ func (s *Server) handleModelDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/models?msg="+url.QueryEscape("已刪除模型"), http.StatusSeeOther)
 }
 
-type mcpData struct {
-	Servers []config.MCPServerConfig
-	CSRF    string
-	Message string
-	Error   string
-}
-
-func (s *Server) renderMCP(w http.ResponseWriter, r *http.Request, d mcpData) {
-	sess, _ := s.sessionOf(r)
-	d.Servers = s.store.Get().MCP.Servers
-	d.CSRF = sess.csrf
-	if d.Message == "" {
-		d.Message = r.URL.Query().Get("msg")
-	}
-	if d.Error == "" {
-		d.Error = r.URL.Query().Get("err")
-	}
-	s.render(w, "mcp", d)
-}
-
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
-	s.renderMCP(w, r, mcpData{})
+	s.render(w, "console", s.page(r, "mcp"))
 }
 
 func (s *Server) handleMCPAdd(w http.ResponseWriter, r *http.Request) {
@@ -721,14 +697,7 @@ func splitList(v string) []string {
 }
 
 func (s *Server) handleDiscord(w http.ResponseWriter, r *http.Request) {
-	csrf, msg, errMsg := s.simpleData(r)
-	cfg := s.store.Get()
-	s.render(w, "discord", struct {
-		Discord config.DiscordConfig
-		CSRF    string
-		Message string
-		Error   string
-	}{cfg.Discord, csrf, msg, errMsg})
+	s.render(w, "console", s.page(r, "discord"))
 }
 
 func (s *Server) handleDiscordSave(w http.ResponseWriter, r *http.Request) {
@@ -778,20 +747,8 @@ func (s *Server) status() map[string]any {
 	return s.bot.Status()
 }
 
-func (s *Server) simpleData(r *http.Request) (string, string, string) {
-	sess, _ := s.sessionOf(r)
-	return sess.csrf, r.URL.Query().Get("msg"), r.URL.Query().Get("err")
-}
-
 func (s *Server) handleVPS(w http.ResponseWriter, r *http.Request) {
-	csrf, msg, errMsg := s.simpleData(r)
-	cfg := s.store.Get()
-	s.render(w, "vps", struct {
-		VPS     config.VPSConfig
-		CSRF    string
-		Message string
-		Error   string
-	}{cfg.VPS, csrf, msg, errMsg})
+	s.render(w, "console", s.page(r, "vps"))
 }
 
 func (s *Server) handleVPSSave(w http.ResponseWriter, r *http.Request) {
@@ -845,14 +802,7 @@ func (s *Server) handleVPSSave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
-	csrf, msg, errMsg := s.simpleData(r)
-	cfg := s.store.Get()
-	s.render(w, "media", struct {
-		Media   config.MediaConfig
-		CSRF    string
-		Message string
-		Error   string
-	}{cfg.Media, csrf, msg, errMsg})
+	s.render(w, "console", s.page(r, "media"))
 }
 
 func (s *Server) handleMediaSave(w http.ResponseWriter, r *http.Request) {
@@ -1040,7 +990,7 @@ func (s *Server) handleFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>啟動中</title><style>body{font-family:system-ui,"Microsoft JhengHei",sans-serif;background:#f5f7fa;color:#1f2937;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;max-width:420px}</style></head><body><div class="card"><h1>設定完成</h1><p>面板即將關閉，Bot 正在啟動。這個分頁可以直接關掉。</p></div></body></html>`)
+	_, _ = fmt.Fprint(w, `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>啟動中</title><script src="https://cdn.tailwindcss.com"></script></head><body class="flex min-h-screen items-center justify-center bg-slate-100 px-5"><div class="max-w-sm rounded-2xl border border-slate-200 bg-white p-7 text-center shadow-sm"><div class="text-2xl">✅</div><h1 class="mt-3 text-lg font-semibold text-slate-900">設定完成</h1><p class="mt-2 text-sm text-slate-500">面板即將關閉，Bot 正在啟動。這個分頁可以直接關掉。</p></div></body></html>`)
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -1073,29 +1023,23 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	sess, _ := s.sessionOf(r)
 	lines := s.logs.Lines(200)
 	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
 		lines[i], lines[j] = lines[j], lines[i]
 	}
-	data := struct {
-		Lines []string
-		CSRF  string
-	}{Lines: lines, CSRF: sess.csrf}
-	s.render(w, "logs", data)
+	d := s.page(r, "logs")
+	d.Lines = lines
+	s.render(w, "console", d)
 }
 
 func (s *Server) handleErrors(w http.ResponseWriter, r *http.Request) {
-	sess, _ := s.sessionOf(r)
 	entries, err := s.mem.Errors(50)
 	if err != nil {
 		s.logger.Printf("讀取錯誤紀錄失敗: %v", err)
 	}
-	data := struct {
-		Entries []memory.ErrorEntry
-		CSRF    string
-	}{Entries: entries, CSRF: sess.csrf}
-	s.render(w, "errors", data)
+	d := s.page(r, "errors")
+	d.Entries = entries
+	s.render(w, "console", d)
 }
 
 func (s *Server) handleAppearance(w http.ResponseWriter, r *http.Request) {
