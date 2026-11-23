@@ -16,3 +16,4 @@
 /cloudflared.yml
 /.cloudflared/
 .DS_Store
+/.cache/

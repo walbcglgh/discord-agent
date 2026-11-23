@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+//go:embed tailwind.css
+var tailwindCSS []byte
 
 type session struct {
 	expires time.Time
@@ -129,6 +133,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/assets/tailwind.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(tailwindCSS)
+	})
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.withAuth(s.handleLogout))
 	mux.HandleFunc("/", s.withAuth(s.handleOverview))
@@ -990,7 +999,7 @@ func (s *Server) handleFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>啟動中</title><script src="https://cdn.tailwindcss.com"></script></head><body class="flex min-h-screen items-center justify-center bg-slate-100 px-5"><div class="max-w-sm rounded-2xl border border-slate-200 bg-white p-7 text-center shadow-sm"><div class="text-2xl">✅</div><h1 class="mt-3 text-lg font-semibold text-slate-900">設定完成</h1><p class="mt-2 text-sm text-slate-500">面板即將關閉，Bot 正在啟動。這個分頁可以直接關掉。</p></div></body></html>`)
+	_, _ = fmt.Fprint(w, `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>啟動中</title><link rel="stylesheet" href="/assets/tailwind.css"></head><body class="flex min-h-screen items-center justify-center bg-slate-100 px-5"><div class="max-w-sm rounded-2xl border border-slate-200 bg-white p-7 text-center shadow-sm"><div class="text-2xl">✅</div><h1 class="mt-3 text-lg font-semibold text-slate-900">設定完成</h1><p class="mt-2 text-sm text-slate-500">面板即將關閉，Bot 正在啟動。這個分頁可以直接關掉。</p></div></body></html>`)
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}

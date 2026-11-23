@@ -7,18 +7,7 @@ var pages = template.Must(template.New("pages").Parse(`
 <html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Selana Agent · 管理面板</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-if (window.tailwind) {
-  tailwind.config = { theme: { extend: { fontFamily: { sans: ['ui-sans-serif','system-ui','Microsoft JhengHei','sans-serif'] } } } };
-}
-</script>
-<style>
-dialog::backdrop{background:rgba(15,23,42,.6)}
-.ui-dialog{width:100%;max-width:min(94vw,720px);border:0;padding:0;border-radius:16px;box-shadow:0 24px 60px rgba(15,23,42,.28)}
-.ui-dialog:not([open]){display:none}
-pre{white-space:pre-wrap;word-break:break-word}
-</style>
+<link rel="stylesheet" href="/assets/tailwind.css">
 </head><body class="min-h-screen bg-slate-100 text-slate-800 antialiased">
 {{end}}
 
