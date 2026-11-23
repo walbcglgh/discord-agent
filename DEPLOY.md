@@ -85,13 +85,12 @@ http://127.0.0.1:8080
 面板首頁只有幾個大按鈕，**按了才會彈出設定視窗**。至少完成：
 
 1. 按 **Discord Bot**：貼上 Bot Token（或填 `DISCORD_BOT_TOKEN` 到 `.env`），按儲存。
-2. 按 **模型**，展開「新增模型」：
-   - 可先選常見預設再按「帶入」
-   - Name：例如 `DeepSeek v4.1 Flash`（會出現在頁尾）
+2. 按 **模型** → **新增提供商**：
+   - 提供商 ID：例如 `deepseek`（小寫、數字、`-`、`_`，建立後不可改）
+   - 顯示名稱、預設 Base URL、API 金鑰（直接貼在後台，不用環境變數名稱）
    - 協議：`openai-chat` / `openai-responses` / `anthropic` / `google`
-   - 上游 Model ID、Base URL、API Key 環境變數名稱
-   - 勾選啟用，按新增
-3. 可選：**VPS**、**語音**、**MCP**、**助理設定** 依需求填。進階欄位都收在「進階」裡。
+3. 在該提供商區塊按 **新增模型**，點一下「模型 ID」欄位會自動抓上游清單；點選一個模型 ID，再填「模型映射」（只出現在頁尾），按確定。抓不到清單時可直接手動輸入模型 ID。
+4. 可選：**VPS**、**語音**、**MCP**、**助理設定** 依需求填。進階欄位都收在「進階」裡。
 
 按完儲存後 `Ctrl+C` 結束面板。密碼若忘記：
 
@@ -249,7 +248,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/discord-agent/data /opt/discord-agent/config.json
+# 不要把 config.json 單獨列在 ReadWritePaths，systemd 會 bind mount 它，
+# 導致面板存檔時 os.Rename 出現 "device or resource busy"。
+ReadWritePaths=/opt/discord-agent/data
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 
 [Install]
@@ -308,11 +309,12 @@ sudo -u agent ./discord-agent -panel -config /opt/discord-agent/config.json -env
 
 | 現象 | 處理 |
 |---|---|
-| `沒有已啟用且具備金鑰的模型` | 按面板的「模型」按鈕新增並啟用模型，確認 API Key 或環境變數有值 |
+| `沒有已啟用的模型` | 按面板的「模型」→「新增提供商」→ 在提供商區塊「新增模型」，並確認提供商的 API Key 已貼上 |
 | `尚未設定 ... 的 API key` | 填寫 API Key，或在 `.env` 設對應環境變數後重啟 |
 | TTS 沒聲音 | 確認 venv 已裝 `edge-tts`，且 systemd 的 `Environment=PATH=...` 已取消註解 |
 | 語音輸入沒反應 | 按面板的「語音」按鈕填 Groq API Key |
 | `mkdir data: permission denied` | 啟動前先 `cd /opt/discord-agent`，資料庫路徑是相對路徑 |
+| `rename .../config.json.tmp .../config.json: device or resource busy` | systemd 的 `ReadWritePaths` 不能單獨列 `config.json`（會被 bind mount 成掛載點）；改成只留 `ReadWritePaths=/opt/discord-agent/data`，再 `daemon-reload` + 重啟服務 |
 | `install: cannot stat '/root/discord-agent-linux-amd64'` | `sudo -i` 後 `~` 是 `/root`，不是 `admin` 家目錄；用 `find /home /tmp /root -name 'discord-agent-linux-amd64'` 找實際位置 |
 | `Unable to reach the origin service ... 127.0.0.1:8080: connection refused` | Tunnel 正常，但面板沒啟動；用 `tmux` 開一次性面板並保持執行 |
 | `Tunnel credentials file ... doesn't exist` | 用 `find /home/admin/.cloudflared /root/.cloudflared -name '*.json'` 找實際路徑，改 `credentials-file` 或複製到 `/root/.cloudflared/` |

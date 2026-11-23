@@ -22,7 +22,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/discord-agent/data /opt/discord-agent/config.json
+# 不要把 config.json 單獨列在這裡：systemd 會把它 bind mount 成掛載點，
+# 導致 Panel 存擋時的 os.Rename 出現 "device or resource busy"。
+ReadWritePaths=/opt/discord-agent/data
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 
 [Install]

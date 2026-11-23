@@ -114,37 +114,50 @@ var pages = template.Must(template.New("pages").Parse(`
 </div></details>
 <button class="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">儲存</button></form></dialog>
 
-<dialog id="m-models" class="ui-dialog"><div class="flex items-center justify-between border-b border-slate-100 px-6 py-4"><h2 class="text-lg font-semibold text-slate-900">模型</h2><button type="button" data-close class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button></div>
-<div class="space-y-5 px-6 py-5">
-<div><h3 class="text-sm font-medium text-slate-900">已設定（{{len .Models}}）</h3>
-{{if .Models}}<div class="mt-2 divide-y divide-slate-100 rounded-xl border border-slate-200">{{range .Models}}<div class="flex items-center gap-3 px-3 py-2.5 text-sm"><span class="flex-1 truncate font-medium text-slate-800">{{.Name}}</span><span class="hidden truncate text-xs text-slate-500 sm:block">{{.ModelID}}</span><span class="text-xs text-slate-400">{{if .Enabled}}啟用{{else}}停用{{end}}</span><form method="post" action="/models/delete" class="m-0"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button class="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">刪除</button></form></div>{{end}}</div>{{else}}<p class="mt-2 text-xs text-slate-500">尚未設定模型，Bot 目前無法回覆。</p>{{end}}</div>
-
-<form method="post" action="/models/add" class="space-y-3 border-t border-slate-100 pt-5"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<h3 class="text-sm font-medium text-slate-900">新增模型</h3>
-<div class="flex gap-2"><select id="model_preset" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="">自訂</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="groq">Groq</option></select><button type="button" onclick="applyPreset()" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">帶入</button></div>
-<div class="grid gap-3 sm:grid-cols-2"><label class="block text-xs font-medium text-slate-600">Name<input name="name" placeholder="DeepSeek V4.1 Flash" required class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></label>
-<label class="block text-xs font-medium text-slate-600">Model ID<input name="model_id" placeholder="deepseek-chat" required class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></label></div>
-<label class="block text-xs font-medium text-slate-600">Base URL<input name="base_url" placeholder="https://api.deepseek.com/v1" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></label>
-<label class="block text-xs font-medium text-slate-600">API Key 環境變數<input name="api_key_env" placeholder="DEEPSEEK_API_KEY" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></label>
-<details class="rounded-xl border border-slate-200 bg-slate-50 p-3"><summary class="cursor-pointer text-sm font-medium text-slate-700">進階</summary><div class="mt-3 space-y-3">
-<label class="block text-xs font-medium text-slate-600">協議<select name="protocol" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"><option value="openai-chat">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic">Anthropic Messages API</option><option value="google">Google API</option></select></label>
-<label class="block text-xs font-medium text-slate-600">直接貼 API Key（不建議）<input name="api_key" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></label>
-<div class="grid grid-cols-2 gap-3"><label class="block text-xs font-medium text-slate-600">Max Tokens<input name="max_tokens" value="1024" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></label><label class="block text-xs font-medium text-slate-600">Temperature<input name="temperature" value="0.7" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></label></div>
-<label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" name="enabled" checked class="h-4 w-4 rounded border-slate-300"> 啟用</label></div></details>
-<button class="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">新增模型</button></form>
-
-<details class="rounded-xl border border-slate-200 bg-slate-50 p-3"><summary class="cursor-pointer text-sm font-medium text-slate-700">從提供商自動抓取模型清單</summary><div class="mt-3">
-<form method="post" action="/models/discover" class="space-y-3"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<label class="block text-xs font-medium text-slate-600">協議<select name="disc_protocol" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"><option value="openai-chat">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option></select></label>
-<label class="block text-xs font-medium text-slate-600">Base URL<input name="disc_base_url" placeholder="https://api.example.com/v1" required class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></label>
-<label class="block text-xs font-medium text-slate-600">API Key 環境變數<input name="disc_key_env" placeholder="EXAMPLE_API_KEY" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></label>
-<button class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50">查詢</button></form>
-{{if .Discovered}}<form method="post" action="/models/bulk" class="mt-4 space-y-2"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="count" value="{{len .Discovered}}"><input type="hidden" name="protocol" value="{{.DiscProtocol}}"><input type="hidden" name="base_url" value="{{.DiscBaseURL}}"><input type="hidden" name="key_env" value="{{.DiscKeyEnv}}"><input type="hidden" name="api_key" value="{{.DiscKey}}">
-<div class="text-xs font-medium text-slate-700">勾選並命名</div>
-{{range $i, $id := .Discovered}}<div class="flex items-center gap-2"><input type="hidden" name="id_{{$i}}" value="{{$id}}"><input type="checkbox" name="use_{{$i}}" checked class="h-4 w-4"><code class="flex-1 truncate text-xs text-slate-600">{{$id}}</code><input name="name_{{$i}}" value="{{$id}}" class="w-40 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"></div>{{end}}
-<button class="mt-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white">批次新增</button></form>{{end}}
-</div></details>
+<dialog id="m-models" class="ui-dialog"><div class="flex items-center justify-between border-b border-slate-100 px-6 py-4"><h2 class="text-lg font-semibold text-slate-900">模型</h2><div class="flex items-center gap-2"><button type="button" data-modal="provider-add" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs hover:bg-slate-50">新增提供商</button><button type="button" data-model-provider="" class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-700">新增模型</button><button type="button" data-close class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button></div></div>
+<div class="space-y-4 px-6 py-5">
+{{if .Providers}}
+{{range $p := .Providers}}
+<div class="rounded-xl border border-slate-200 bg-white">
+<div class="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3"><div class="min-w-0 flex-1"><div class="truncate text-sm font-semibold text-slate-900">{{$p.Name}}</div><div class="truncate text-xs text-slate-400">{{$p.ID}} · {{$p.Protocol}} · {{index $.ProviderCounts $p.ID}} 個模型</div></div>
+<button type="button" data-model-provider="{{$p.ID}}" class="rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100">新增模型</button>
+<details class="relative"><summary class="cursor-pointer rounded-lg px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-100">編輯</summary><form method="post" action="/providers/update" class="absolute right-0 top-8 z-20 w-72 space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-lg"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{$p.ID}}">
+<label class="block text-xs font-medium text-slate-600">顯示名稱<input name="name" value="{{$p.Name}}" required class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"></label>
+<label class="block text-xs font-medium text-slate-600">Base URL<input name="base_url" value="{{$p.BaseURL}}" required class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"></label>
+<label class="block text-xs font-medium text-slate-600">協議<select name="protocol" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"><option value="openai-chat" {{if eq $p.Protocol "openai-chat"}}selected{{end}}>OpenAI Chat Completions</option><option value="openai-responses" {{if eq $p.Protocol "openai-responses"}}selected{{end}}>OpenAI Responses</option><option value="anthropic" {{if eq $p.Protocol "anthropic"}}selected{{end}}>Anthropic Messages</option><option value="google" {{if eq $p.Protocol "google"}}selected{{end}}>Google API</option></select></label>
+<label class="block text-xs font-medium text-slate-600">API 金鑰（留空沿用）<input name="api_key" type="password" autocomplete="off" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"></label>
+<button class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white">儲存</button></form></details>
+<form method="post" action="/providers/delete" class="m-0" onsubmit="return confirm('刪除這個提供商與旗下所有模型？')"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{$p.ID}}"><button class="rounded-lg px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50">刪除</button></form>
+</div>
+<div class="divide-y divide-slate-100 px-4">
+{{range $.Models}}{{if eq .ProviderID $p.ID}}<div class="flex items-center gap-3 py-2.5 text-sm"><span class="flex-1 truncate font-medium text-slate-800">{{.Name}}</span><code class="hidden flex-1 truncate text-xs text-slate-500 sm:block">{{.ModelID}}</code><span class="text-xs text-slate-400">{{if .Enabled}}啟用{{else}}停用{{end}}</span><form method="post" action="/models/delete" class="m-0"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button class="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">刪除</button></form></div>{{end}}{{end}}
+{{if eq (index $.ProviderCounts $p.ID) 0}}<div class="py-3 text-xs text-slate-500">尚未新增模型。</div>{{end}}
+</div></div>
+{{end}}
+{{else}}<p class="text-xs text-slate-500">尚未設定提供商。先按「新增提供商」，再選 providers 新增模型。</p>{{end}}
 </div></dialog>
+
+<dialog id="m-provider-add" class="ui-dialog"><div class="flex items-center justify-between border-b border-slate-100 px-6 py-4"><h2 class="text-lg font-semibold text-slate-900">新增提供商</h2><button type="button" data-close class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button></div>
+<form method="post" action="/providers/add" class="space-y-4 px-6 py-5"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label class="block text-sm font-medium text-slate-700">提供商 ID <span class="text-rose-500">*</span><input name="id" placeholder="例如 openai, google, anthropic" pattern="[a-z0-9_-]+" required class="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><span class="mt-1 block text-xs font-normal text-slate-500">小寫字母、數字、連字號、底線；建立後不可更改。</span></label>
+<label class="block text-sm font-medium text-slate-700">顯示名稱 <span class="text-rose-500">*</span><input name="name" placeholder="例如 OpenAI, Google Gemini" required class="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+<label class="block text-sm font-medium text-slate-700">預設 Base URL <span class="text-rose-500">*</span><input name="base_url" placeholder="https://api.example.com" required class="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+<label class="block text-sm font-medium text-slate-700">API 金鑰<input name="api_key" type="password" autocomplete="off" placeholder="選填，直接貼在後台" class="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></label>
+<label class="block text-sm font-medium text-slate-700">協議 <span class="text-rose-500">*</span><select name="protocol" class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="openai-chat">OpenAI 相容（Chat Completions）</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic">Anthropic Messages</option><option value="google">Google API</option></select></label>
+<div class="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" data-close class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm">取消</button><button class="rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-600">儲存</button></div>
+</form></dialog>
+
+<dialog id="m-model-add" class="ui-dialog"><div class="flex items-center justify-between border-b border-slate-100 px-6 py-4"><h2 class="text-lg font-semibold text-slate-900">新增模型</h2><button type="button" data-close class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button></div>
+<form method="post" action="/models/add" class="space-y-4 px-6 py-5"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label class="block text-sm font-medium text-slate-700">提供商<select id="model_provider" name="provider_id" class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm">{{range .Providers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+<label class="relative block text-sm font-medium text-slate-700">模型 ID <span class="text-rose-500">*</span>
+<input id="model_id_input" name="model_id" placeholder="例如 gpt-4o, gemini-2.0-flash" autocomplete="off" required class="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+<div id="model_suggestions" class="absolute left-0 right-0 top-full z-20 mt-1 hidden max-h-60 overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg"></div>
+<span class="mt-1 block text-xs font-normal text-slate-500">點一下欄位會自動抓這個提供商的模型清單；抓不到時可直接手動輸入。</span></label>
+<label class="block text-sm font-medium text-slate-700">模型映射 <span class="text-rose-500">*</span><input name="name" placeholder="例如 GPT-4o, Gemini 2.0 Flash" required class="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><span class="mt-1 block text-xs font-normal text-slate-500">只會出現在「本輪由 … 生成回覆」。</span></label>
+<label class="block text-sm font-medium text-slate-700">模型類型<select name="model_type" class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm"><option>聊天</option></select></label>
+<div class="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" data-close class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm">取消</button><button class="rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-600">確定</button></div>
+</form></dialog>
 
 <dialog id="m-mcp" class="ui-dialog"><div class="flex items-center justify-between border-b border-slate-100 px-6 py-4"><h2 class="text-lg font-semibold text-slate-900">MCP</h2><button type="button" data-close class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100">✕</button></div>
 <div class="space-y-5 px-6 py-5">
@@ -226,11 +239,80 @@ function openModal(id) {
   var el = document.getElementById('m-' + id);
   if (el && typeof el.showModal === 'function') el.showModal();
 }
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c];
+  });
+}
+var modelCache = {};
+function openModelDialog(providerID) {
+  var sel = document.getElementById('model_provider');
+  var input = document.getElementById('model_id_input');
+  var box = document.getElementById('model_suggestions');
+  if (sel && providerID) sel.value = providerID;
+  if (input) input.value = '';
+  if (box) { box.innerHTML = ''; box.classList.add('hidden'); }
+  openModal('model-add');
+  if (input) setTimeout(function () { input.focus(); }, 50);
+}
+function renderSuggestions(filter) {
+  var sel = document.getElementById('model_provider');
+  var box = document.getElementById('model_suggestions');
+  if (!sel || !box) return;
+  var list = modelCache[sel.value] || [];
+  var q = String(filter || '').toLowerCase();
+  var items = list.filter(function (x) { return x.toLowerCase().indexOf(q) >= 0; }).slice(0, 100);
+  if (items.length === 0) { box.innerHTML = ''; box.classList.add('hidden'); return; }
+  box.innerHTML = items.map(function (x) {
+    return '<button type="button" data-pick-model="' + esc(x) + '" class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">' + esc(x) + '</button>';
+  }).join('');
+  box.classList.remove('hidden');
+}
+async function loadModels() {
+  var sel = document.getElementById('model_provider');
+  if (!sel || !sel.value) return;
+  var id = sel.value;
+  try {
+    if (!modelCache[id]) {
+      var res = await fetch('/models/list?provider_id=' + encodeURIComponent(id), {credentials: 'same-origin'});
+      if (!res.ok) throw new Error('fetch failed');
+      var data = await res.json();
+      modelCache[id] = Array.isArray(data.models) ? data.models : [];
+    }
+    renderSuggestions(document.getElementById('model_id_input').value);
+  } catch (e) {
+    var box = document.getElementById('model_suggestions');
+    if (box) { box.innerHTML = ''; box.classList.add('hidden'); }
+  }
+}
+var modelInput = document.getElementById('model_id_input');
+if (modelInput) {
+  modelInput.addEventListener('focus', loadModels);
+  modelInput.addEventListener('input', function () { renderSuggestions(modelInput.value); });
+}
+var providerSelect = document.getElementById('model_provider');
+if (providerSelect) providerSelect.addEventListener('change', function () {
+  modelCache = {};
+  var box = document.getElementById('model_suggestions');
+  if (box) { box.innerHTML = ''; box.classList.add('hidden'); }
+});
 document.addEventListener('click', function (e) {
+  var pick = e.target.closest('[data-pick-model]');
+  if (pick) {
+    document.getElementById('model_id_input').value = pick.getAttribute('data-pick-model');
+    document.getElementById('model_suggestions').classList.add('hidden');
+    return;
+  }
+  var mp = e.target.closest('[data-model-provider]');
+  if (mp) { openModelDialog(mp.getAttribute('data-model-provider')); return; }
   var t = e.target.closest('[data-modal]');
   if (t) { openModal(t.getAttribute('data-modal')); return; }
   var c = e.target.closest('[data-close]');
   if (c) { var d = c.closest('dialog'); if (d) d.close(); }
+  if (!e.target.closest('#model_id_input') && !e.target.closest('#model_suggestions')) {
+    var box = document.getElementById('model_suggestions');
+    if (box) box.classList.add('hidden');
+  }
 });
 document.querySelectorAll('dialog').forEach(function (d) {
   d.addEventListener('click', function (e) { if (e.target === d) d.close(); });
@@ -241,23 +323,6 @@ function copyRedirect() {
 }
 var redirect = document.getElementById('oauth_redirect');
 if (redirect) redirect.textContent = location.origin + '/mcp/oauth/callback';
-function applyPreset() {
-  var p = document.getElementById('model_preset').value;
-  var presets = {
-    deepseek: {name:'DeepSeek V4.1 Flash', protocol:'openai-chat', base_url:'https://api.deepseek.com/v1', model_id:'deepseek-chat', key:'DEEPSEEK_API_KEY'},
-    openai: {name:'OpenAI GPT', protocol:'openai-chat', base_url:'https://api.openai.com/v1', model_id:'gpt-4o-mini', key:'OPENAI_API_KEY'},
-    anthropic: {name:'Anthropic Claude', protocol:'anthropic', base_url:'https://api.anthropic.com/v1', model_id:'claude-3-5-haiku-latest', key:'ANTHROPIC_API_KEY'},
-    gemini: {name:'Google Gemini', protocol:'google', base_url:'https://generativelanguage.googleapis.com/v1beta', model_id:'gemini-2.0-flash', key:'GEMINI_API_KEY'},
-    groq: {name:'Groq', protocol:'openai-chat', base_url:'https://api.groq.com/openai/v1', model_id:'llama-3.3-70b-versatile', key:'GROQ_API_KEY'}
-  };
-  var v = presets[p]; if (!v) return;
-  var f = document.querySelector('form[action="/models/add"]');
-  f.elements['name'].value = v.name;
-  f.elements['protocol'].value = v.protocol;
-  f.elements['base_url'].value = v.base_url;
-  f.elements['model_id'].value = v.model_id;
-  f.elements['api_key_env'].value = v.key;
-}
 {{if .Active}}document.addEventListener('DOMContentLoaded', function () { openModal('{{.Active}}'); });{{end}}
 var toast = document.getElementById('toast');
 if (toast) setTimeout(function () { toast.remove(); }, 8000);

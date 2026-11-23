@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -64,29 +65,26 @@ type PanelConfig struct {
 }
 
 type LLMConfig struct {
-	Models []ModelConfig `json:"models"`
-	// Legacy fields are only used to migrate old configs; the panel never shows them.
-	LegacyDefaultProvider string                    `json:"default_provider,omitempty"`
-	LegacyProviders       map[string]ProviderConfig `json:"providers,omitempty"`
+	Providers []ProviderConfig `json:"providers"`
+	Models    []ModelConfig    `json:"models"`
+	// Legacy fields are only used to migrate old config.json files.
+	LegacyDefaultProvider string                          `json:"-"`
+	LegacyProviders       map[string]LegacyProviderConfig `json:"-"`
 }
 
-// ModelConfig is an independent upstream model. Name is the routing group and
-// the text shown in the footer; multiple models may share the same Name.
-type ModelConfig struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Protocol    string  `json:"protocol"`
-	BaseURL     string  `json:"base_url,omitempty"`
-	APIKeyEnv   string  `json:"api_key_env,omitempty"`
-	APIKey      string  `json:"api_key,omitempty"`
-	ModelID     string  `json:"model_id"`
-	MaxTokens   int     `json:"max_tokens,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-	Enabled     bool    `json:"enabled"`
-}
-
-// ProviderConfig is kept only for reading old config.json files.
+// ProviderConfig is an upstream provider entered in the panel. API keys are
+// stored directly in config.json; APIKeyEnv is only kept for old configs.
 type ProviderConfig struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Protocol  string `json:"protocol"`
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key,omitempty"`
+	APIKeyEnv string `json:"api_key_env,omitempty"`
+}
+
+// LegacyProviderConfig is the pre-provider-block format, kept for migration.
+type LegacyProviderConfig struct {
 	Type        string  `json:"type"`
 	BaseURL     string  `json:"base_url,omitempty"`
 	APIKeyEnv   string  `json:"api_key_env,omitempty"`
@@ -95,6 +93,117 @@ type ProviderConfig struct {
 	MaxTokens   int     `json:"max_tokens,omitempty"`
 	Temperature float64 `json:"temperature,omitempty"`
 	Enabled     bool    `json:"enabled"`
+}
+
+// ModelConfig is one model under a provider. Name is the panel mapping shown
+// in the reply footer; ModelID is the upstream id sent to the provider.
+// Protocol/BaseURL/APIKey* are resolved from the provider and kept only for
+// reading old configs.
+type ModelConfig struct {
+	ID          string  `json:"id"`
+	ProviderID  string  `json:"provider_id,omitempty"`
+	Name        string  `json:"name"`
+	ModelID     string  `json:"model_id"`
+	Protocol    string  `json:"protocol,omitempty"`
+	BaseURL     string  `json:"base_url,omitempty"`
+	APIKeyEnv   string  `json:"api_key_env,omitempty"`
+	APIKey      string  `json:"api_key,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+	Enabled     bool    `json:"enabled"`
+}
+
+func (l *LLMConfig) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Providers       json.RawMessage `json:"providers"`
+		Models          []ModelConfig   `json:"models"`
+		DefaultProvider string          `json:"default_provider"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	l.Models = raw.Models
+	l.LegacyDefaultProvider = raw.DefaultProvider
+	if len(raw.Providers) == 0 || string(raw.Providers) == "null" {
+		return nil
+	}
+	var list []ProviderConfig
+	if err := json.Unmarshal(raw.Providers, &list); err == nil {
+		l.Providers = list
+		return nil
+	}
+	var legacy map[string]LegacyProviderConfig
+	if err := json.Unmarshal(raw.Providers, &legacy); err == nil {
+		l.LegacyProviders = legacy
+	}
+	return nil
+}
+
+func (l LLMConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Providers []ProviderConfig `json:"providers"`
+		Models    []ModelConfig    `json:"models"`
+	}{l.Providers, l.Models})
+}
+
+func (l *LLMConfig) ProviderByID(id string) *ProviderConfig {
+	for i := range l.Providers {
+		if l.Providers[i].ID == id {
+			return &l.Providers[i]
+		}
+	}
+	return nil
+}
+
+// ResolveModel fills protocol, base URL and key from the owning provider.
+func (c *Config) ResolveModel(mc ModelConfig) (ModelConfig, bool) {
+	out := mc
+	if p := c.LLM.ProviderByID(mc.ProviderID); p != nil {
+		out.Protocol, out.BaseURL = p.Protocol, p.BaseURL
+		if strings.TrimSpace(out.BaseURL) == "" {
+			out.BaseURL = DefaultBaseURL(p.Protocol)
+		}
+		out.APIKey, out.APIKeyEnv = p.APIKey, p.APIKeyEnv
+		return out, true
+	}
+	return out, mc.APIKey != "" || mc.APIKeyEnv != ""
+}
+
+// ProviderNameOf is used in error logs so entries show which provider failed.
+func (c *Config) ProviderNameOf(mc ModelConfig) string {
+	if p := c.LLM.ProviderByID(mc.ProviderID); p != nil && strings.TrimSpace(p.Name) != "" {
+		return p.Name
+	}
+	if strings.TrimSpace(mc.Name) != "" {
+		return mc.Name
+	}
+	return "unknown"
+}
+
+// DefaultBaseURL fills old configs that have no provider base URL.
+func DefaultBaseURL(protocol string) string {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case ProtocolOpenAIChat, ProtocolOpenAIResponses:
+		return "https://api.openai.com/v1"
+	case ProtocolAnthropic:
+		return "https://api.anthropic.com/v1"
+	case ProtocolGoogle, "gemini":
+		return "https://generativelanguage.googleapis.com/v1beta"
+	}
+	return ""
+}
+
+func slugID(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 type MCPConfig struct {
@@ -192,7 +301,7 @@ func Default() *Config {
 			Enabled: false, Listen: "127.0.0.1:8080", Username: "admin",
 			SessionHours: 24, AllowedIPs: []string{},
 		},
-		LLM: LLMConfig{Models: []ModelConfig{}},
+		LLM: LLMConfig{Providers: []ProviderConfig{}, Models: []ModelConfig{}},
 		MCP: MCPConfig{Servers: []MCPServerConfig{}},
 		VPS: VPSConfig{Port: 22, User: "root", AuthType: "key", KeyEnv: "VPS_SSH_KEY"},
 		Media: MediaConfig{
@@ -273,25 +382,64 @@ func (s *Store) set(cfg *Config) {
 }
 
 func migrateLegacy(cfg *Config) {
-	if len(cfg.LLM.Models) > 0 || len(cfg.LLM.LegacyProviders) == 0 {
-		return
-	}
-	for name, p := range cfg.LLM.LegacyProviders {
-		protocol := ProtocolOpenAIChat
-		switch p.Type {
-		case "anthropic":
-			protocol = ProtocolAnthropic
-		case "gemini", "google":
-			protocol = ProtocolGoogle
+	if len(cfg.LLM.LegacyProviders) > 0 {
+		names := make([]string, 0, len(cfg.LLM.LegacyProviders))
+		for name := range cfg.LLM.LegacyProviders {
+			names = append(names, name)
 		}
-		cfg.LLM.Models = append(cfg.LLM.Models, ModelConfig{
-			ID: NewID("m_"), Name: name, Protocol: protocol, BaseURL: p.BaseURL,
-			APIKeyEnv: p.APIKeyEnv, APIKey: p.APIKey, ModelID: p.Model,
-			MaxTokens: p.MaxTokens, Temperature: p.Temperature, Enabled: p.Enabled,
-		})
+		sort.Strings(names)
+		for _, name := range names {
+			p := cfg.LLM.LegacyProviders[name]
+			protocol := ProtocolOpenAIChat
+			switch p.Type {
+			case "anthropic":
+				protocol = ProtocolAnthropic
+			case "gemini", "google":
+				protocol = ProtocolGoogle
+			}
+			id := uniqueProviderID(cfg.LLM.Providers, name)
+			cfg.LLM.Providers = append(cfg.LLM.Providers, ProviderConfig{
+				ID: id, Name: name, Protocol: protocol,
+				BaseURL: p.BaseURL, APIKey: p.APIKey, APIKeyEnv: p.APIKeyEnv,
+			})
+			cfg.LLM.Models = append(cfg.LLM.Models, ModelConfig{
+				ID: NewID("m_"), ProviderID: id, Name: name, ModelID: p.Model,
+				MaxTokens: p.MaxTokens, Temperature: p.Temperature, Enabled: p.Enabled,
+			})
+		}
+		cfg.LLM.LegacyProviders = nil
+		cfg.LLM.LegacyDefaultProvider = ""
 	}
-	cfg.LLM.LegacyProviders = nil
-	cfg.LLM.LegacyDefaultProvider = ""
+	// Old per-model configs become a provider block each.
+	for i := range cfg.LLM.Models {
+		m := &cfg.LLM.Models[i]
+		if m.ProviderID != "" {
+			continue
+		}
+		id := uniqueProviderID(cfg.LLM.Providers, m.Name)
+		cfg.LLM.Providers = append(cfg.LLM.Providers, ProviderConfig{
+			ID: id, Name: m.Name, Protocol: m.Protocol, BaseURL: m.BaseURL,
+			APIKey: m.APIKey, APIKeyEnv: m.APIKeyEnv,
+		})
+		m.ProviderID = id
+		m.Protocol, m.BaseURL, m.APIKey, m.APIKeyEnv = "", "", "", ""
+	}
+}
+
+func uniqueProviderID(list []ProviderConfig, name string) string {
+	base := slugID(name)
+	if base == "" {
+		base = "provider"
+	}
+	used := map[string]bool{}
+	for _, p := range list {
+		used[p.ID] = true
+	}
+	id := base
+	for n := 2; used[id]; n++ {
+		id = fmt.Sprintf("%s-%d", base, n)
+	}
+	return id
 }
 
 // Reload re-reads config.json so a separately running panel can hot-update
@@ -352,12 +500,18 @@ func writeAtomic(path string, cfg *Config) error {
 }
 
 func validProtocol(p string) bool {
-	switch p {
-	case ProtocolOpenAIChat, ProtocolOpenAIResponses, ProtocolAnthropic, ProtocolGoogle:
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case ProtocolOpenAIChat, ProtocolOpenAIResponses, ProtocolAnthropic, ProtocolGoogle, "gemini":
 		return true
 	}
 	return false
 }
+
+// IsValidProtocol is used by the bot when filtering enabled models.
+func IsValidProtocol(p string) bool { return validProtocol(p) }
+
+// ValidProviderID checks the panel's provider id rule.
+func ValidProviderID(id string) bool { return id != "" && slugID(id) == id }
 
 func validate(c *Config) error {
 	if strings.TrimSpace(c.AssistantName) == "" {
@@ -383,15 +537,38 @@ func validate(c *Config) error {
 	if c.Chat.MaxToolRounds < 0 || c.Chat.MaxToolRounds > 10 {
 		return errors.New("chat.max_tool_rounds 必須在 0~10")
 	}
+	seenProviders := map[string]bool{}
+	for i := range c.LLM.Providers {
+		p := &c.LLM.Providers[i]
+		if strings.TrimSpace(p.ID) == "" || slugID(p.ID) != p.ID {
+			return errors.New("提供商 ID 只能用小寫字母、數字、- 與 _")
+		}
+		if seenProviders[p.ID] {
+			return fmt.Errorf("提供商 ID %q 重複", p.ID)
+		}
+		seenProviders[p.ID] = true
+		if strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("提供商 %q 的名稱不可為空", p.ID)
+		}
+		if strings.TrimSpace(p.BaseURL) == "" {
+			p.BaseURL = DefaultBaseURL(p.Protocol)
+		}
+		if !validProtocol(p.Protocol) {
+			return fmt.Errorf("提供商 %q 的 protocol 不支援", p.ID)
+		}
+	}
 	for _, m := range c.LLM.Models {
 		if strings.TrimSpace(m.Name) == "" || strings.TrimSpace(m.ModelID) == "" {
-			return errors.New("每個模型的 name 與 model_id 都不可為空")
+			return errors.New("每個模型的映射名稱與 model_id 都不可為空")
 		}
-		if !validProtocol(m.Protocol) {
-			return fmt.Errorf("模型 %q 的 protocol 不支援", m.Name)
+		if m.ProviderID == "" {
+			if !validProtocol(m.Protocol) {
+				return fmt.Errorf("模型 %q 缺少提供商", m.Name)
+			}
+			continue
 		}
-		if m.Enabled && m.APIKey == "" && m.APIKeyEnv == "" {
-			return fmt.Errorf("已啟用的模型 %q 必須設定 api_key 或 api_key_env", m.Name)
+		if !seenProviders[m.ProviderID] {
+			return fmt.Errorf("模型 %q 指向不存在的提供商 %q", m.Name, m.ProviderID)
 		}
 	}
 	for _, s := range c.MCP.Servers {

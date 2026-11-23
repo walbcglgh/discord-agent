@@ -66,11 +66,8 @@ type pageData struct {
 	UnavailableMessage string
 	Display            config.DisplayConfig
 	Models             []config.ModelConfig
-	Discovered         []string
-	DiscProtocol       string
-	DiscBaseURL        string
-	DiscKeyEnv         string
-	DiscKey            string
+	Providers          []config.ProviderConfig
+	ProviderCounts     map[string]int
 	Servers            []config.MCPServerConfig
 	Discord            config.DiscordConfig
 	VPS                config.VPSConfig
@@ -144,9 +141,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/settings", s.withAuth(s.handleSettings))
 	mux.HandleFunc("/models", s.withAuth(s.handleModels))
 	mux.HandleFunc("/models/add", s.withAuth(s.handleModelAdd))
-	mux.HandleFunc("/models/discover", s.withAuth(s.handleModelDiscover))
-	mux.HandleFunc("/models/bulk", s.withAuth(s.handleModelBulk))
 	mux.HandleFunc("/models/delete", s.withAuth(s.handleModelDelete))
+	mux.HandleFunc("/models/list", s.withAuth(s.handleModelList))
+	mux.HandleFunc("/providers/add", s.withAuth(s.handleProviderAdd))
+	mux.HandleFunc("/providers/update", s.withAuth(s.handleProviderUpdate))
+	mux.HandleFunc("/providers/delete", s.withAuth(s.handleProviderDelete))
 	mux.HandleFunc("/mcp", s.withAuth(s.handleMCP))
 	mux.HandleFunc("/mcp/add", s.withAuth(s.handleMCPAdd))
 	mux.HandleFunc("/mcp/delete", s.withAuth(s.handleMCPDelete))
@@ -367,9 +366,13 @@ func (s *Server) page(r *http.Request, active string) pageData {
 		Message: r.URL.Query().Get("msg"), Error: r.URL.Query().Get("err"),
 		Status: s.status(), Config: cfg,
 		Discord: cfg.Discord, VPS: cfg.VPS, Media: cfg.Media,
-		Models: cfg.LLM.Models, Servers: cfg.MCP.Servers,
+		Models: cfg.LLM.Models, Providers: cfg.LLM.Providers, Servers: cfg.MCP.Servers,
 		AssistantName: cfg.AssistantName, UnavailableMessage: cfg.UnavailableMessage,
 		Display: cfg.Display,
+	}
+	d.ProviderCounts = map[string]int{}
+	for _, m := range d.Models {
+		d.ProviderCounts[m.ProviderID]++
 	}
 	env := map[string]bool{}
 	names := []string{cfg.Discord.TokenEnv, "PANEL_PASSWORD"}
@@ -466,31 +469,17 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "console", s.page(r, "models"))
 }
 
-func modelFromForm(r *http.Request) (config.ModelConfig, error) {
-	maxTokens, _ := strconv.Atoi(r.FormValue("max_tokens"))
-	temp, _ := strconv.ParseFloat(r.FormValue("temperature"), 64)
-	m := config.ModelConfig{
-		ID: r.FormValue("id"), Name: strings.TrimSpace(r.FormValue("name")),
-		Protocol: r.FormValue("protocol"), BaseURL: strings.TrimSpace(r.FormValue("base_url")),
-		APIKeyEnv: strings.TrimSpace(r.FormValue("api_key_env")), APIKey: strings.TrimSpace(r.FormValue("api_key")),
-		ModelID: strings.TrimSpace(r.FormValue("model_id")), MaxTokens: maxTokens,
-		Temperature: temp, Enabled: r.FormValue("enabled") == "on",
-	}
-	if m.Name == "" || m.ModelID == "" {
-		return m, fmt.Errorf("name 與 model_id 不可為空")
-	}
-	return m, nil
-}
-
 func (s *Server) handleModelAdd(w http.ResponseWriter, r *http.Request) {
 	sess, _ := s.sessionOf(r)
 	if r.Method != http.MethodPost || r.FormValue("csrf") != sess.csrf {
 		http.Error(w, "請求無效", http.StatusForbidden)
 		return
 	}
-	m, err := modelFromForm(r)
-	if err != nil {
-		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+	providerID := strings.TrimSpace(r.FormValue("provider_id"))
+	name := strings.TrimSpace(r.FormValue("name"))
+	modelID := strings.TrimSpace(r.FormValue("model_id"))
+	if name == "" || modelID == "" || providerID == "" {
+		http.Redirect(w, r, "/models?err="+url.QueryEscape("提供商、模型 ID 與模型映射都不可為空"), http.StatusSeeOther)
 		return
 	}
 	next, err := s.store.Get().Clone()
@@ -498,74 +487,142 @@ func (s *Server) handleModelAdd(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	m.ID = config.NewID("m_")
-	next.LLM.Models = append(next.LLM.Models, m)
+	if next.LLM.ProviderByID(providerID) == nil {
+		http.Redirect(w, r, "/models?err="+url.QueryEscape("找不到提供商"), http.StatusSeeOther)
+		return
+	}
+	next.LLM.Models = append(next.LLM.Models, config.ModelConfig{
+		ID: config.NewID("m_"), ProviderID: providerID,
+		Name: name, ModelID: modelID, MaxTokens: 1024, Temperature: 0.7, Enabled: true,
+	})
 	if err := s.store.Replace(next); err != nil {
 		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/models?msg="+url.QueryEscape("已新增模型 "+m.Name), http.StatusSeeOther)
+	http.Redirect(w, r, "/models?msg="+url.QueryEscape("已新增模型 "+name), http.StatusSeeOther)
 }
 
-func (s *Server) handleModelDiscover(w http.ResponseWriter, r *http.Request) {
-	sess, _ := s.sessionOf(r)
-	if r.Method != http.MethodPost || r.FormValue("csrf") != sess.csrf {
-		http.Error(w, "請求無效", http.StatusForbidden)
+// handleModelList returns upstream model ids for a provider. Failures return
+// an empty list so the panel simply hides suggestions and allows manual input.
+func (s *Server) handleModelList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	empty := []byte(`{"models":[]}`)
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = w.Write(empty)
 		return
 	}
-	base := strings.TrimSpace(r.FormValue("disc_base_url"))
-	keyEnv := strings.TrimSpace(r.FormValue("disc_key_env"))
-	key := strings.TrimSpace(r.FormValue("disc_key"))
-	protocol := r.FormValue("disc_protocol")
-	ids, err := llm.DiscoverModels(r.Context(), base, config.Secret(keyEnv, key))
+	p := s.store.Get().LLM.ProviderByID(strings.TrimSpace(r.URL.Query().Get("provider_id")))
+	if p == nil {
+		_, _ = w.Write(empty)
+		return
+	}
+	ids, err := llm.DiscoverModels(r.Context(), p.BaseURL, config.Secret(p.APIKeyEnv, p.APIKey))
 	if err != nil {
-		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		_, _ = w.Write(empty)
 		return
 	}
-	d := s.page(r, "models")
-	d.Discovered, d.DiscProtocol, d.DiscBaseURL, d.DiscKeyEnv, d.DiscKey = ids, protocol, base, keyEnv, key
-	s.render(w, "console", d)
+	if ids == nil {
+		ids = []string{}
+	}
+	b, _ := json.Marshal(map[string]any{"models": ids})
+	_, _ = w.Write(b)
 }
 
-func (s *Server) handleModelBulk(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleProviderAdd(w http.ResponseWriter, r *http.Request) {
 	sess, _ := s.sessionOf(r)
 	if r.Method != http.MethodPost || r.FormValue("csrf") != sess.csrf {
 		http.Error(w, "請求無效", http.StatusForbidden)
 		return
 	}
-	count, _ := strconv.Atoi(r.FormValue("count"))
+	id := strings.ToLower(strings.TrimSpace(r.FormValue("id")))
+	name := strings.TrimSpace(r.FormValue("name"))
+	base := strings.TrimSpace(r.FormValue("base_url"))
+	protocol := r.FormValue("protocol")
+	if !config.ValidProviderID(id) || name == "" || base == "" || !config.IsValidProtocol(protocol) {
+		http.Redirect(w, r, "/models?err="+url.QueryEscape("提供商資料不合法"), http.StatusSeeOther)
+		return
+	}
 	next, err := s.store.Get().Clone()
 	if err != nil {
 		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	added := 0
-	for i := 0; i < count; i++ {
-		if r.FormValue(fmt.Sprintf("use_%d", i)) != "on" {
-			continue
-		}
-		id := strings.TrimSpace(r.FormValue(fmt.Sprintf("id_%d", i)))
-		name := strings.TrimSpace(r.FormValue(fmt.Sprintf("name_%d", i)))
-		if id == "" || name == "" {
-			continue
-		}
-		next.LLM.Models = append(next.LLM.Models, config.ModelConfig{
-			ID: config.NewID("m_"), Name: name, Protocol: r.FormValue("protocol"),
-			BaseURL: r.FormValue("base_url"), APIKeyEnv: r.FormValue("key_env"),
-			APIKey: r.FormValue("api_key"), ModelID: id,
-			MaxTokens: 1024, Temperature: 0.7, Enabled: true,
-		})
-		added++
-	}
-	if added == 0 {
-		http.Redirect(w, r, "/models?err="+url.QueryEscape("沒有勾選任何模型"), http.StatusSeeOther)
+	if next.LLM.ProviderByID(id) != nil {
+		http.Redirect(w, r, "/models?err="+url.QueryEscape("提供商 ID 已存在"), http.StatusSeeOther)
 		return
+	}
+	next.LLM.Providers = append(next.LLM.Providers, config.ProviderConfig{
+		ID: id, Name: name, BaseURL: base, Protocol: protocol,
+		APIKey: strings.TrimSpace(r.FormValue("api_key")),
+	})
+	if err := s.store.Replace(next); err != nil {
+		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/models?msg="+url.QueryEscape("已新增提供商 "+name), http.StatusSeeOther)
+}
+
+func (s *Server) handleProviderUpdate(w http.ResponseWriter, r *http.Request) {
+	sess, _ := s.sessionOf(r)
+	if r.Method != http.MethodPost || r.FormValue("csrf") != sess.csrf {
+		http.Error(w, "請求無效", http.StatusForbidden)
+		return
+	}
+	next, err := s.store.Get().Clone()
+	if err != nil {
+		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	p := next.LLM.ProviderByID(strings.TrimSpace(r.FormValue("id")))
+	if p == nil {
+		http.Redirect(w, r, "/models?err="+url.QueryEscape("找不到提供商"), http.StatusSeeOther)
+		return
+	}
+	p.Name = strings.TrimSpace(r.FormValue("name"))
+	p.BaseURL = strings.TrimSpace(r.FormValue("base_url"))
+	p.Protocol = r.FormValue("protocol")
+	if key := strings.TrimSpace(r.FormValue("api_key")); key != "" {
+		p.APIKey = key
 	}
 	if err := s.store.Replace(next); err != nil {
 		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/models?msg="+url.QueryEscape(fmt.Sprintf("已新增 %d 個模型", added)), http.StatusSeeOther)
+	http.Redirect(w, r, "/models?msg="+url.QueryEscape("已更新提供商 "+p.Name), http.StatusSeeOther)
+}
+
+func (s *Server) handleProviderDelete(w http.ResponseWriter, r *http.Request) {
+	sess, _ := s.sessionOf(r)
+	if r.Method != http.MethodPost || r.FormValue("csrf") != sess.csrf {
+		http.Error(w, "請求無效", http.StatusForbidden)
+		return
+	}
+	id := strings.TrimSpace(r.FormValue("id"))
+	next, err := s.store.Get().Clone()
+	if err != nil {
+		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	providers := next.LLM.Providers[:0]
+	for _, p := range next.LLM.Providers {
+		if p.ID != id {
+			providers = append(providers, p)
+		}
+	}
+	next.LLM.Providers = providers
+	models := next.LLM.Models[:0]
+	for _, m := range next.LLM.Models {
+		if m.ProviderID != id {
+			models = append(models, m)
+		}
+	}
+	next.LLM.Models = models
+	if err := s.store.Replace(next); err != nil {
+		http.Redirect(w, r, "/models?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/models?msg="+url.QueryEscape("已刪除提供商與旗下模型"), http.StatusSeeOther)
 }
 
 func (s *Server) handleModelDelete(w http.ResponseWriter, r *http.Request) {

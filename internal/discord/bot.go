@@ -358,6 +358,9 @@ func unavailableMessage(cfg *config.Config) string {
 func (b *Bot) secrets() []string {
 	cfg := b.store.Get()
 	list := []string{b.botToken, os.Getenv("PANEL_PASSWORD"), os.Getenv(cfg.Discord.TokenEnv), cfg.Discord.Token}
+	for _, p := range cfg.LLM.Providers {
+		list = append(list, p.APIKey, os.Getenv(p.APIKeyEnv))
+	}
 	for _, m := range cfg.LLM.Models {
 		list = append(list, m.APIKey, os.Getenv(m.APIKeyEnv))
 	}
@@ -462,7 +465,7 @@ func (b *Bot) buildMessages(cfg *config.Config, scope, userText, stage string, i
 
 func firstModel(cfg *config.Config) (config.ModelConfig, bool) {
 	for _, m := range cfg.LLM.Models {
-		if m.Enabled && config.Secret(m.APIKeyEnv, m.APIKey) != "" {
+		if m.Enabled {
 			return m, true
 		}
 	}
@@ -474,12 +477,16 @@ func firstModel(cfg *config.Config) (config.ModelConfig, bool) {
 func routeCandidates(cfg *config.Config) ([]config.ModelConfig, error) {
 	var enabled []config.ModelConfig
 	for _, m := range cfg.LLM.Models {
-		if m.Enabled && config.Secret(m.APIKeyEnv, m.APIKey) != "" {
+		if !m.Enabled {
+			continue
+		}
+		resolved, ok := cfg.ResolveModel(m)
+		if ok && config.IsValidProtocol(resolved.Protocol) {
 			enabled = append(enabled, m)
 		}
 	}
 	if len(enabled) == 0 {
-		return nil, fmt.Errorf("沒有已啟用且具備金鑰的模型")
+		return nil, fmt.Errorf("沒有已啟用的模型")
 	}
 	primary := enabled[rand.Intn(len(enabled))]
 	out := []config.ModelConfig{primary}
@@ -507,7 +514,8 @@ func (b *Bot) generate(ctx context.Context, cfg *config.Config, scope, userText 
 			return gen, nil
 		}
 		lastName = mc.Name
-		lastErr = fmt.Errorf("%s: %w", mc.Name, gerr)
+		lastErr = fmt.Errorf("提供商 %s / 模型 %s (%s): %w",
+			cfg.ProviderNameOf(mc), mc.Name, mc.ModelID, gerr)
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("模型暫時無法回覆")
@@ -516,7 +524,11 @@ func (b *Bot) generate(ctx context.Context, cfg *config.Config, scope, userText 
 }
 
 func (b *Bot) generateWithModel(ctx context.Context, cfg *config.Config, mc config.ModelConfig, scope, userText string, images []llm.Image) (Generation, error) {
-	provider, err := llm.New(mc)
+	resolved, ok := cfg.ResolveModel(mc)
+	if !ok {
+		return Generation{}, fmt.Errorf("模型 %q 找不到提供商設定", mc.Name)
+	}
+	provider, err := llm.New(resolved)
 	if err != nil {
 		return Generation{}, err
 	}
@@ -618,7 +630,11 @@ func (b *Bot) maybeSummarize(cfg *config.Config, scope string) {
 		if !ok {
 			return
 		}
-		provider, err := llm.New(mc)
+		resolved, ok := cfg.ResolveModel(mc)
+		if !ok {
+			return
+		}
+		provider, err := llm.New(resolved)
 		if err != nil {
 			return
 		}
@@ -642,14 +658,17 @@ func (b *Bot) Status() map[string]any {
 	stats, _ := b.mem.Stats()
 	modelName := b.currentModelName(cfg)
 	modelID := "未設定"
+	providerName := "未設定"
 	if ok {
 		modelID = mc.ModelID
+		providerName = cfg.ProviderNameOf(mc)
 	}
 	return map[string]any{
 		"uptime":     time.Since(b.started).Round(time.Second).String(),
 		"bot_id":     b.botID,
-		"provider":   modelName,
+		"provider":   providerName,
 		"model":      modelID,
+		"mapping":    modelName,
 		"reply_mode": cfg.Discord.ReplyMode,
 		"assistant":  assistantName(cfg),
 		"messages":   stats["messages"],

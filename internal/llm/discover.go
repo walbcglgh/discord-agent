@@ -22,7 +22,7 @@ func DiscoverModels(ctx context.Context, base, key string) ([]string, error) {
 		return nil, fmt.Errorf("請先填寫 API Key")
 	}
 	url := base
-	if !strings.HasSuffix(url, "/v1") && !strings.Contains(url, "/v1/") {
+	if !strings.Contains(url, "/v1") && !strings.Contains(url, "/v1beta") {
 		url += "/v1"
 	}
 	url += "/models"

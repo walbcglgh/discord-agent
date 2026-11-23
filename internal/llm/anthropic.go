@@ -21,7 +21,7 @@ func (p *anthropicProvider) Name() string { return "anthropic" }
 func (p *anthropicProvider) Chat(ctx context.Context, req Request) (Response, error) {
 	key := apiKey(p.cfg)
 	if key == "" {
-		return Response{}, fmt.Errorf("尚未設定 %s 的 API key", p.cfg.APIKeyEnv)
+		return Response{}, fmt.Errorf("尚未設定 API key")
 	}
 	var systemParts []string
 	messages := make([]any, 0, len(req.Messages))
